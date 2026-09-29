@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+__pycache__
+.pytest_cache
+.ruff_cache
+data
+tests
+*.wav
+*.mp3
+*.flac
+node_modules
+test-results
+playwright-report

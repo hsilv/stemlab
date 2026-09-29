@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stemlab"
+version = "0.1.0"
+description = "Local-first infrastructure for WAV source separation"
+requires-python = ">=3.11,<3.13"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "celery[redis]>=5.5,<6",
+  "pydantic-settings>=2.8,<3",
+  "soundfile>=0.13,<1",
+  "numpy>=1.26,<2",
+]
+
+[project.optional-dependencies]
+inference = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1"]
+cuda = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1"]
+
+[tool.uv]
+conflicts = [[{ extra = "inference" }, { extra = "cuda" }]]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", extra = "inference" }, { index = "pytorch-cuda", extra = "cuda" }]
+torchaudio = [{ index = "pytorch-cpu", extra = "inference" }, { index = "pytorch-cuda", extra = "cuda" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[dependency-groups]
+dev = ["httpx>=0.28,<1", "pytest>=8,<10", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stemlab"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

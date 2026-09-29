@@ -1,0 +1,55 @@
+name: stemlab
+x-app: &app
+  build: .
+  environment:
+    STEMLAB_BROKER_URL: redis://queue:6379/0
+    STEMLAB_RESULT_BACKEND: redis://queue:6379/1
+    STEMLAB_DATA_DIR: /data
+    STEMLAB_DEVICE: ${STEMLAB_DEVICE:-auto}
+    STEMLAB_MAX_UPLOAD_MB: ${STEMLAB_MAX_UPLOAD_MB:-200}
+    STEMLAB_MAX_DURATION_SECONDS: ${STEMLAB_MAX_DURATION_SECONDS:-900}
+    STEMLAB_JOB_TIMEOUT_SECONDS: ${STEMLAB_JOB_TIMEOUT_SECONDS:-7200}
+    STEMLAB_CPU_THREADS: ${STEMLAB_CPU_THREADS:-4}
+  volumes:
+    - audio-data:/data
+  depends_on:
+    queue:
+      condition: service_healthy
+  init: true
+
+services:
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:${STEMLAB_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  worker:
+    <<: *app
+    hostname: worker
+    stop_grace_period: 30s
+    command: ["celery", "-A", "stemlab.worker:app", "worker", "--loglevel=info", "--concurrency=1", "--hostname=celery@worker"]
+    healthcheck:
+      test: ["CMD", "celery", "-A", "stemlab.worker:app", "inspect", "ping", "--destination=celery@worker", "--timeout=5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+  queue:
+    image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - queue-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  audio-data:
+  queue-data:

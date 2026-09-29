@@ -1,0 +1,16 @@
+# NVIDIA GPU worker; requires Docker Engine with NVIDIA Container Toolkit.
+services:
+  worker:
+    build:
+      context: .
+      args:
+        INFERENCE_EXTRA: cuda
+    environment:
+      STEMLAB_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
