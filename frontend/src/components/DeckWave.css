@@ -1,0 +1,219 @@
+.deck-wave {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  user-select: none;
+}
+
+.deck-detail,
+.deck-overview {
+  position: relative;
+  background: var(--deck);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.deck-detail {
+  height: 148px;
+  cursor: pointer;
+}
+
+.deck-detail.armed {
+  border-color: var(--amber);
+  cursor: crosshair;
+}
+
+.deck-overview {
+  height: 28px;
+  cursor: pointer;
+}
+
+.deck-detail canvas,
+.deck-overview canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-viewport {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-right: 1px solid var(--secondary);
+  border-left: 1px solid var(--secondary);
+  pointer-events: none;
+}
+
+.deck-bands,
+.deck-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.deck-band,
+.deck-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid var(--amber);
+  border-left: 1px solid var(--amber);
+  pointer-events: none;
+}
+
+.deck-band {
+  background: color-mix(in srgb, var(--amber) 28%, transparent);
+}
+
+.deck-selection {
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+}
+
+.deck-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 4;
+}
+
+.deck-edge.start {
+  left: 0;
+}
+
+.deck-edge.end {
+  right: 0;
+}
+
+.deck-edge::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  width: 2px;
+  background: var(--amber);
+}
+
+.deck-edge.start::before {
+  left: 0;
+}
+
+.deck-edge.end::before {
+  right: 0;
+}
+
+.deck-edge:hover::before,
+.deck-edge:focus-visible::before {
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.deck-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.deck-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.deck-marker::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: var(--amber);
+}
+
+.deck-cue-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--amber);
+  pointer-events: none;
+}
+
+.deck-needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.deck-needle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  border-top: 6px solid var(--amber);
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+}
+
+.deck-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.deck-zoom {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.deck-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.deck-volume input {
+  width: 128px;
+  margin: 0;
+  accent-color: var(--amber);
+}
+
+.deck-volume input:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}

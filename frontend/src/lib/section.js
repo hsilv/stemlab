@@ -4,11 +4,24 @@ import { session } from "./state.svelte.js";
 import { waveformOf } from "./waveform.js";
 import { api } from "./api.js";
 
+function playbackVolume(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 1;
+  return Math.min(1, Math.max(0, number));
+}
+
+export function setPreviewVolume(value) {
+  session.volume = playbackVolume(value);
+  for (const id of ["deck-audio", "section-audio"]) {
+    const audio = document.getElementById(id);
+    if (audio) audio.volume = session.volume;
+  }
+}
+
 export function resetSection() {
   session.fileCues = [];
   session.xmlCues = [];
   session.ranges = [];
-  session.flash = "";
   session.wave = null;
   const audio = document.getElementById("section-audio");
   if (audio) audio.pause();
@@ -25,20 +38,20 @@ export function setSection(from, to) {
   session.to = to;
 }
 
-function tenth(time) {
-  return Math.round(time * 10) / 10;
+function placed(time) {
+  return Math.round(time * 10000) / 10000;
 }
 
 function clampEdge(time, other, edge) {
   const limit = session.wave?.duration ?? 0;
-  let value = Math.min(limit, Math.max(0, tenth(time)));
+  let value = Math.min(limit, Math.max(0, placed(time)));
   if (other === "") return value;
   const bound = +other;
   value =
     edge === "from"
-      ? Math.min(value, tenth(bound - 0.1))
-      : Math.max(value, tenth(bound + 0.1));
-  return Math.min(limit, Math.max(0, tenth(value)));
+      ? Math.min(value, placed(bound - 0.1))
+      : Math.max(value, placed(bound + 0.1));
+  return Math.min(limit, Math.max(0, placed(value)));
 }
 
 export function moveSelectionEdge(edge, time) {
@@ -64,10 +77,10 @@ export function moveRangeEdge(index, edge, time) {
   if (!range || !session.wave) return;
   let from = +range.from;
   let to = +range.to;
-  if (edge === "from") from = Math.min(tenth(time), tenth(to - 0.1));
-  else to = Math.max(tenth(time), tenth(from + 0.1));
-  from = Math.max(0, tenth(from));
-  to = Math.min(session.wave.duration, tenth(to));
+  if (edge === "from") from = Math.min(placed(time), placed(to - 0.1));
+  else to = Math.max(placed(time), placed(from + 0.1));
+  from = Math.max(0, placed(from));
+  to = Math.min(session.wave.duration, placed(to));
   const others = session.ranges
     .filter((_, item) => item !== index)
     .map((item) => [+item.from, +item.to]);
@@ -106,7 +119,6 @@ export function addRange() {
   const next = [...session.ranges, { from: savedFrom, to: savedTo }];
   next.sort((a, b) => +a.from - +b.from);
   session.ranges = next;
-  session.flash = `${savedFrom}|${savedTo}`;
   session.from = "";
   session.to = "";
   session.message = "";
@@ -118,7 +130,6 @@ export function removeRange(index) {
 
 export function clearRanges() {
   session.ranges = [];
-  session.flash = "";
   setSection("", "");
 }
 
@@ -159,5 +170,8 @@ export async function loadFileMedia(chosen) {
   session.wave = wave;
   session.audioUrl = URL.createObjectURL(chosen);
   const audio = document.getElementById("section-audio");
-  if (audio) audio.src = session.audioUrl;
+  if (audio) {
+    audio.src = session.audioUrl;
+    audio.volume = session.volume;
+  }
 }

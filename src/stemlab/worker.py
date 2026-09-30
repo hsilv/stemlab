@@ -60,6 +60,14 @@ def range_options(row):
 def run_job(job_id, task_id, lock_fd):
     if not jobs.claim(job_id, task_id):
         return
+    # Local import: analysis.py pulls in the inference stack, which the API process must not load.
+    from stemlab.analysis import inference_lock
+
+    with inference_lock():
+        separate(job_id, task_id, lock_fd)
+
+
+def separate(job_id, task_id, lock_fd):
     folder = settings.data_dir / job_id
     output = folder / "stems"
     process = None

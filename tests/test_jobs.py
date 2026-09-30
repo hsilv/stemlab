@@ -1,5 +1,6 @@
 import fcntl
 import io
+import sqlite3
 import time
 from unittest.mock import patch
 from uuid import uuid4
@@ -406,3 +407,106 @@ def test_invalid_ranges_rejected_and_cleaned_up(client, query):
     assert response.status_code == 422
     assert client.get("/api/jobs").json() == []
     assert not any(path.is_dir() for path in settings.data_dir.iterdir())
+
+
+def test_old_job_migrates_with_null_analysis_fields(client):
+    with sqlite3.connect(settings.data_dir / "jobs.sqlite3") as db:
+        db.execute("""CREATE TABLE jobs (
+            id TEXT PRIMARY KEY, filename TEXT NOT NULL, status TEXT NOT NULL,
+            stage TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+            duration REAL NOT NULL, sample_rate INTEGER NOT NULL, channels INTEGER NOT NULL,
+            error TEXT, task_id TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'all', keep TEXT,
+            model TEXT NOT NULL DEFAULT 'htdemucs',
+            shifts INTEGER NOT NULL DEFAULT 0,
+            overlap REAL NOT NULL DEFAULT 0.25,
+            vocals TEXT NOT NULL DEFAULT 'demucs',
+            instruments_from TEXT NOT NULL DEFAULT 'mix',
+            range_start REAL, range_end REAL, ranges TEXT)""")
+        db.execute(
+            "INSERT INTO jobs (id, filename, status, stage, created, updated, duration, "
+            "sample_rate, channels, task_id) "
+            "VALUES ('old', 'song.wav', 'completed', 'Ready', 1, 1, 3, 44100, 2, 'task')"
+        )
+    row = client.get("/api/jobs").json()[0]
+    assert row["status"] == "completed"
+    assert row["filename"] == "song.wav"
+    for key in ("bpm", "camelot", "key_name", "downbeat", "analysis_warning"):
+        assert row[key] is None
+    again = jobs.get("old")
+    assert again["bpm"] is None and again["analysis_warning"] is None
+
+
+def test_create_stores_analysis_fields(client):
+    omitted = upload(client).json()
+    for key in ("bpm", "camelot", "key_name", "downbeat", "analysis_warning"):
+        assert omitted[key] is None
+    row = client.post(
+        "/api/jobs",
+        params={
+            "filename": "track.wav",
+            "bpm": 128.04,
+            "camelot": "8A",
+            "key_name": "A minor",
+            "downbeat": 0.25,
+            "analysis_warning": "The bridge drifts",
+        },
+        content=wav(),
+    ).json()
+    assert row["bpm"] == pytest.approx(128.04)
+    assert (row["camelot"], row["key_name"]) == ("8A", "A minor")
+    assert row["downbeat"] == pytest.approx(0.25)
+    assert row["analysis_warning"] == "The bridge drifts"
+    saved = client.get(f"/api/jobs/{row['id']}").json()
+    assert saved["camelot"] == "8A"
+    assert saved["analysis_warning"] == "The bridge drifts"
+    jobs.update(row["id"], status="failed")
+    client.post(f"/api/jobs/{row['id']}/retry")
+    kept = jobs.get(row["id"])
+    assert kept["bpm"] == pytest.approx(128.04)
+    assert kept["camelot"] == "8A"
+    assert kept["key_name"] == "A minor"
+    assert kept["downbeat"] == pytest.approx(0.25)
+    assert kept["analysis_warning"] == "The bridge drifts"
+    blank = client.post(
+        "/api/jobs", params={"filename": "track.wav", "analysis_warning": ""}, content=wav()
+    ).json()
+    assert blank["analysis_warning"] == ""
+    assert client.post("/api/jobs?filename=track.wav&bpm=-1", content=wav()).status_code == 422
+
+
+def test_separation_holds_the_inference_lock(client):
+    row = upload(client).json()
+    seen = {}
+
+    def fake_popen(*args, **kwargs):
+        path = settings.data_dir / "inference.lock"
+        with path.open("a") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                seen["held"] = True
+            else:
+                seen["held"] = False
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+        class Finished:
+            returncode = 1
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        return Finished()
+
+    with patch("stemlab.worker.subprocess.Popen", side_effect=fake_popen):
+        separate_job.apply(args=[row["id"]], task_id=jobs.get(row["id"])["task_id"])
+    assert seen["held"] is True

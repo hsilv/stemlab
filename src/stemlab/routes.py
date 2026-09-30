@@ -1,4 +1,10 @@
+import json
+import logging
+import os
 import shutil
+import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
@@ -158,6 +164,39 @@ def resolve_ranges(spans, duration):
     return resolved
 
 
+def uploaded_name(filename):
+    filename = filename.replace("\\", "/").split("/")[-1]
+    if not filename.lower().endswith((".wav", ".mp3")):
+        raise HTTPException(422, "Choose a .wav or .mp3 file.")
+    return filename
+
+
+def upload_limit(request):
+    limit = settings.max_upload_mb * 1024 * 1024
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid content length.") from exc
+        if length > limit:
+            raise HTTPException(413, "The file exceeds the upload size limit.")
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(settings.data_dir).free < limit + 1024**3:
+        raise HTTPException(507, "Not enough free disk space. Delete old jobs first.")
+    return limit
+
+
+async def write_upload(request, source, limit):
+    size = 0
+    with source.open("wb") as target:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(413, "The file exceeds the upload size limit.")
+            await run_in_threadpool(target.write, chunk)
+
+
 @router.post("/jobs", status_code=202)
 async def upload(
     request: Request,
@@ -172,6 +211,11 @@ async def upload(
     start: float | None = Query(default=None, ge=0),
     end: float | None = Query(default=None, gt=0),
     ranges: str | None = Query(default=None, max_length=500),
+    bpm: float | None = Query(default=None, ge=0),
+    camelot: str | None = Query(default=None, max_length=16),
+    key_name: str | None = Query(default=None, max_length=80),
+    downbeat: float | None = Query(default=None, ge=0),
+    analysis_warning: str | None = Query(default=None, max_length=500),
 ):
     """Stream a raw WAV (audio/wav) or MP3 (audio/mpeg) request body."""
     sources = keep.split(",") if keep is not None else None
@@ -181,33 +225,14 @@ async def upload(
             raise ValueError("Mix minus vocals only works for No vocals.")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    filename = filename.replace("\\", "/").split("/")[-1]
-    if not filename.lower().endswith((".wav", ".mp3")):
-        raise HTTPException(422, "Choose a .wav or .mp3 file.")
-    limit = settings.max_upload_mb * 1024 * 1024
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            length = int(content_length)
-        except ValueError as exc:
-            raise HTTPException(400, "Invalid content length.") from exc
-        if length > limit:
-            raise HTTPException(413, "The file exceeds the upload size limit.")
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(settings.data_dir).free < limit + 1024**3:
-        raise HTTPException(507, "Not enough free disk space. Delete old jobs first.")
+    filename = uploaded_name(filename)
+    limit = upload_limit(request)
     job_id = str(uuid4())
     folder = settings.data_dir / job_id
     folder.mkdir()
     source = jobs.source_path({"id": job_id, "filename": filename})
     try:
-        size = 0
-        with source.open("wb") as target:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > limit:
-                    raise HTTPException(413, "The file exceeds the upload size limit.")
-                await run_in_threadpool(target.write, chunk)
+        await write_upload(request, source, limit)
         info = await run_in_threadpool(validate_audio, source)
         if ranges and (start is not None or end is not None):
             raise HTTPException(422, "Send either start and end, or ranges.")
@@ -240,6 +265,13 @@ async def upload(
             sources,
             section,
             stored_ranges,
+            {
+                "bpm": bpm,
+                "camelot": camelot,
+                "key_name": key_name,
+                "downbeat": downbeat,
+                "analysis_warning": analysis_warning,
+            },
         )
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
@@ -326,3 +358,182 @@ def download(job_id: UUID):
     return FileResponse(
         path, media_type="application/zip", filename=f"{Path(row['filename']).stem}-stems.zip"
     )
+
+
+ANALYSIS_STAGES = frozenset(
+    {
+        "Checking the file",
+        "Reading tempo and key",
+        "Waiting for the separator",
+        "Isolating drums and bass",
+        "Isolating the instrumental",
+    }
+)
+READING_FIELDS = ("bpm", "camelot", "key_name", "downbeat", "warning")
+
+
+def analysis_interpreter():
+    return Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"
+
+
+def analysis_dir(analysis_id):
+    return settings.data_dir / "analyses" / analysis_id
+
+
+def analysis_source(analysis_id, filename):
+    suffix = ".mp3" if filename.lower().endswith(".mp3") else ".wav"
+    return analysis_dir(analysis_id) / f"source{suffix}"
+
+
+def stage_of(line):
+    text = line.strip()
+    if text.startswith("STAGE:"):
+        text = text.removeprefix("STAGE:").strip()
+    if text in ANALYSIS_STAGES:
+        return text
+    return None
+
+
+def latest_stage(path):
+    if not path.is_file():
+        return None
+    with path.open("rb") as handle:
+        handle.seek(max(0, path.stat().st_size - 4096))
+        text = handle.read().decode(errors="replace")
+    stage = None
+    for line in text.splitlines():
+        found = stage_of(line)
+        if found:
+            stage = found
+    return stage
+
+
+def analysis_error(path):
+    message = "Analysis failed."
+    if path.is_file():
+        for line in path.read_text(errors="replace").splitlines():
+            if line.strip() and stage_of(line) is None:
+                message = line.strip()
+    return message[:500]
+
+
+def reading_fields(payload):
+    warning = payload.get("warning")
+    bpm = payload.get("bpm")
+    return {
+        "bpm": None if bpm is None else round(float(bpm), 2),
+        "camelot": payload.get("camelot"),
+        "key_name": payload.get("key_name"),
+        "downbeat": payload.get("downbeat"),
+        "warning": "" if warning is None else warning,
+    }
+
+
+def present_analysis(row):
+    payload = {
+        "id": row["id"],
+        "status": row["status"],
+        "stage": row["stage"],
+        "error": row["error"],
+    }
+    if row["status"] == "running":
+        stage = latest_stage(analysis_dir(row["id"]) / "stages.log")
+        if stage:
+            payload["stage"] = stage
+    if row["status"] == "completed":
+        for key in READING_FIELDS:
+            payload[key] = row[key]
+        if payload["bpm"] is not None:
+            payload["bpm"] = round(float(payload["bpm"]), 2)
+        if payload["warning"] is None:
+            payload["warning"] = ""
+    return payload
+
+
+def follow_analysis(analysis_id, source):
+    """Run the analysis child. Its stdout and stderr land under the data directory."""
+    folder = source.parent
+    stdout_path = folder / "reading.json"
+    stderr_path = folder / "stages.log"
+    process = None
+    try:
+        with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
+            process = subprocess.Popen(
+                [str(analysis_interpreter()), "-m", "stemlab.analysis", str(source)],
+                stdout=stdout,
+                stderr=stderr,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+            started = time.monotonic()
+            seen = None
+            while process.poll() is None:
+                stage = latest_stage(stderr_path)
+                if stage and stage != seen:
+                    jobs.update_analysis(analysis_id, stage=stage)
+                    seen = stage
+                if time.monotonic() - started > settings.job_timeout_seconds:
+                    raise TimeoutError("Analysis exceeded the configured time limit.")
+                time.sleep(0.2)
+        if process.returncode:
+            raise RuntimeError(analysis_error(stderr_path))
+        try:
+            fields = reading_fields(json.loads(stdout_path.read_text()))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Analysis returned an unreadable result.") from exc
+        recorded = {"status": "completed", "error": None, **fields}
+        stage = latest_stage(stderr_path)
+        if stage:
+            recorded["stage"] = stage
+        source.unlink(missing_ok=True)
+        jobs.update_analysis(analysis_id, **recorded)
+    except Exception as exc:
+        logging.exception("Analysis failed for %s", analysis_id)
+        recorded = {"status": "failed", "error": str(exc)}
+        stage = latest_stage(stderr_path)
+        if stage:
+            recorded["stage"] = stage
+        source.unlink(missing_ok=True)
+        jobs.update_analysis(analysis_id, **recorded)
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        source.unlink(missing_ok=True)
+
+
+@router.post("/analyses", status_code=202)
+async def start_analysis(request: Request, filename: str = Query(min_length=1, max_length=240)):
+    """Stream a raw WAV or MP3 and measure tempo and key in a child process."""
+    filename = uploaded_name(filename)
+    limit = upload_limit(request)
+    analysis_id = str(uuid4())
+    folder = analysis_dir(analysis_id)
+    folder.mkdir(parents=True)
+    source = analysis_source(analysis_id, filename)
+    try:
+        await write_upload(request, source, limit)
+        await run_in_threadpool(validate_audio, source)
+        row = await run_in_threadpool(jobs.create_analysis, analysis_id)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    payload = present_analysis(row)
+    threading.Thread(
+        target=follow_analysis,
+        args=(analysis_id, source),
+        name=f"analysis-{analysis_id}",
+        daemon=True,
+    ).start()
+    return payload
+
+
+@router.get("/analyses/{analysis_id}")
+def analysis(analysis_id: UUID):
+    row = jobs.get_analysis(str(analysis_id))
+    if not row:
+        raise HTTPException(404, "Analysis not found.")
+    return present_analysis(row)

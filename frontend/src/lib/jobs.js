@@ -2,8 +2,123 @@ import { api } from "./api.js";
 import { activeStatuses } from "./labels.js";
 import { chosenSources, spanError } from "./plan.js";
 import { clearTags } from "./deck.js";
-import { resetSection } from "./section.js";
+import { resetSection, setPreviewVolume } from "./section.js";
 import { session, showPage } from "./state.svelte.js";
+
+let analysisToken = 0;
+let analysisAbort = null;
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function failureText(body, fallback) {
+  return typeof body?.detail === "string" ? body.detail : fallback;
+}
+
+export function resetAnalysis() {
+  analysisToken += 1;
+  analysisAbort?.abort();
+  analysisAbort = null;
+  session.analysisStatus = "";
+  session.analysisStage = "";
+  session.bpm = null;
+  session.camelot = null;
+  session.keyName = null;
+  session.downbeat = null;
+  session.analysisWarning = "";
+  session.needle = 0;
+  session.zoom = 1;
+  setPreviewVolume(1);
+  session.downbeatArmed = false;
+}
+
+function failAnalysis(message) {
+  session.analysisStatus = "failed";
+  session.analysisStage = "";
+  session.bpm = null;
+  session.camelot = null;
+  session.keyName = null;
+  session.downbeat = null;
+  session.analysisWarning = "";
+  session.downbeatArmed = false;
+  session.message = message;
+}
+
+function applyAnalysis(body) {
+  if (body.stage) session.analysisStage = body.stage;
+  if (body.status === "completed") {
+    session.bpm = body.bpm ?? null;
+    session.camelot = body.camelot ?? null;
+    session.keyName = body.key_name ?? null;
+    session.downbeat = body.downbeat ?? null;
+    session.analysisWarning = body.warning || "";
+    session.analysisStatus = "completed";
+    return true;
+  }
+  if (body.status === "failed") {
+    failAnalysis(body.error || "Could not read tempo and key.");
+    return true;
+  }
+  return false;
+}
+
+async function pollAnalysis(id, token, signal) {
+  while (token === analysisToken) {
+    const response = await fetch(`/api/analyses/${id}`, { signal });
+    const body = await response.json().catch(() => ({}));
+    if (token !== analysisToken) return;
+    if (!response.ok) {
+      failAnalysis(failureText(body, "Could not read tempo and key."));
+      return;
+    }
+    if (applyAnalysis(body)) return;
+    await wait(400);
+  }
+}
+
+export async function beginAnalysis(file) {
+  resetAnalysis();
+  const token = analysisToken;
+  session.analysisStatus = "running";
+  session.analysisStage = "Checking the file";
+  analysisAbort = new AbortController();
+  const signal = analysisAbort.signal;
+  try {
+    const response = await fetch(
+      `/api/analyses?${new URLSearchParams({ filename: file.name })}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": file.name.toLowerCase().endsWith(".mp3")
+            ? "audio/mpeg"
+            : "audio/wav",
+        },
+        body: file,
+        signal,
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (token !== analysisToken) return;
+    if (!response.ok) {
+      failAnalysis(failureText(body, "Could not read tempo and key."));
+      return;
+    }
+    if (!applyAnalysis(body)) await pollAnalysis(body.id, token, signal);
+  } catch (error) {
+    if (token !== analysisToken || error?.name === "AbortError") return;
+    failAnalysis("Could not read tempo and key.");
+  }
+}
+
+function appendReading(params) {
+  if (session.analysisStatus !== "completed") return;
+  if (session.bpm != null) params.set("bpm", String(session.bpm));
+  if (session.camelot) params.set("camelot", session.camelot);
+  if (session.keyName) params.set("key_name", session.keyName);
+  if (session.downbeat != null) params.set("downbeat", String(session.downbeat));
+  params.set("analysis_warning", session.analysisWarning || "");
+}
 
 export async function loadConfig() {
   try {
@@ -129,6 +244,7 @@ export function separate() {
   } else if (spans.length > 1) {
     params.set("ranges", spans.map((pair) => `${pair[0]}-${pair[1]}`).join(","));
   }
+  appendReading(params);
   showPage("process");
   xhr.open("POST", `/api/jobs?${params}`);
   xhr.setRequestHeader(

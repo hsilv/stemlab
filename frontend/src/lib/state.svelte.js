@@ -22,7 +22,6 @@ export const session = $state({
   from: "",
   to: "",
   ranges: [],
-  flash: "",
   fileCues: [],
   xmlCues: [],
   wave: null,
@@ -35,6 +34,17 @@ export const session = $state({
   message: "",
   actionPending: false,
   tags: null,
+  analysisStatus: "",
+  analysisStage: "",
+  bpm: null,
+  camelot: null,
+  keyName: null,
+  downbeat: null,
+  analysisWarning: "",
+  needle: 0,
+  zoom: 1,
+  volume: 1,
+  downbeatArmed: false,
 });
 
 export function showPage(next) {

@@ -1,6 +1,6 @@
 <script>
   import "./TrackDetail.css";
-  import { duration } from "../lib/format.js";
+  import { duration, readingLine } from "../lib/format.js";
   import { runJobAction } from "../lib/jobs.js";
   import {
     activeStatuses,
@@ -12,6 +12,10 @@
 
   const row = $derived(
     session.rows.find((item) => item.id === session.selectedId) ?? null,
+  );
+
+  const reading = $derived(
+    row ? readingLine(row.bpm, row.camelot, row.key_name) : "",
   );
 
   function pauseOthers(event) {
@@ -58,6 +62,12 @@
     <p class="note">
       Output: {modeNames[row.mode] || "All stems"} · {qualityText(row)}{rangeNote(row)}
     </p>
+    {#if reading}
+      <p id="job-reading" class="note">{reading}</p>
+    {/if}
+    {#if row.analysis_warning}
+      <p class="note">{row.analysis_warning}</p>
+    {/if}
     {#if row.error}
       <p class="error">{row.error}</p>
     {/if}

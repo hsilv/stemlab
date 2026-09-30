@@ -389,6 +389,48 @@ def write_outputs(sources, sample_rate, output, plan, backdrop=None, offset=0):
     return files
 
 
+def isolate_window(audio, sample_rate, kind):
+    """Return drums plus bass, or the mix minus the vocals, for one in-memory buffer.
+
+    Plain htdemucs, no shifts. Nothing is written. audio is float32 (frames, channels)
+    and the result matches that shape and sample rate.
+    """
+    import torch
+    from demucs.audio import convert_audio
+
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim == 1:
+        audio = audio[:, None]
+    if kind == "drums":
+        wanted = {"drums", "bass"}
+    elif kind == "instrumental":
+        wanted = {"vocals"}
+    else:
+        raise ValueError("Window kind must be drums or instrumental.")
+    channels, frames = audio.shape[1], audio.shape[0]
+    _models, device, model = open_models("htdemucs")
+    mix = convert_audio(
+        torch.from_numpy(np.ascontiguousarray(audio.T)),
+        sample_rate,
+        model.samplerate,
+        model.audio_channels,
+    )
+    estimates = run_demucs(model, mix, device, shifts=0, overlap=0.25, wanted=wanted)
+    names = list(model.sources)
+    if kind == "drums":
+        stem = estimates[names.index("drums")] + estimates[names.index("bass")]
+    else:
+        stem = mix - estimates[names.index("vocals")]
+    back = convert_audio(stem.detach().cpu(), model.samplerate, sample_rate, channels)
+    out = np.ascontiguousarray(back.numpy().T, dtype=np.float32)
+    if len(out) == frames:
+        return out
+    fitted = np.zeros((frames, channels), dtype=np.float32)
+    count = min(frames, len(out))
+    fitted[:count] = out[:count]
+    return fitted
+
+
 def encode(signal, sample_rate, path):
     samples = signal.T
     if not np.isfinite(samples).all():

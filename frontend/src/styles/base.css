@@ -192,7 +192,7 @@ input[type="number"] {
   background: var(--deck);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
 }
 
 input[type="checkbox"],

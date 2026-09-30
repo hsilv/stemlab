@@ -9,7 +9,7 @@
     sources,
     vocalNames,
   } from "../lib/labels.js";
-  import { goLoad, goRanges } from "../lib/nav.js";
+  import { analysisSettled, goLoad, goRanges } from "../lib/nav.js";
   import { chosenSources, isInvertible, previewNote } from "../lib/plan.js";
   import { setKeep, setMode } from "../lib/selection.js";
   import { session } from "../lib/state.svelte.js";
@@ -18,6 +18,7 @@
   const note = $derived(previewNote(session.mode, chosen));
   const invertible = $derived(isInvertible(session.mode, session.keep));
   const blocked = $derived(!session.file || session.uploading || !chosen.length);
+  const waiting = $derived(!!session.file && !analysisSettled());
 </script>
 
 <div
@@ -92,6 +93,7 @@
     </div>
     <fieldset class="quality">
       <legend>Separation quality</legend>
+      <div class="quality-fields">
       <label
         >Vocals<select id="vocals" bind:value={session.vocals}>
           {#each session.config?.vocal_models ?? [] as value (value)}
@@ -133,6 +135,7 @@
           {/each}
         </select></label
       >
+      </div>
       <p class="note">
         Higher quality takes longer. Roformer models give cleaner vocals; Demucs
         always makes drums, bass and other, and shifts and overlap tune that stage.
@@ -145,7 +148,7 @@
   </fieldset>
   <div class="pager">
     <button type="button" id="back-load" class="back" onclick={goLoad}>Back</button>
-    <button type="button" id="to-ranges" class="next" class:primary={!blocked} disabled={blocked} onclick={goRanges}
+    <button type="button" id="to-ranges" class="next" class:primary={!blocked && !waiting} disabled={blocked || waiting} onclick={goRanges}
       >Set ranges</button
     >
   </div>

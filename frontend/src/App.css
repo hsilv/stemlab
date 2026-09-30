@@ -73,7 +73,7 @@ main {
 }
 
 .step {
-  padding: 0 var(--space-2) var(--pad);
+  padding: var(--pad) var(--space-2);
   color: var(--secondary);
   font: inherit;
   font-weight: 500;
@@ -158,14 +158,20 @@ main {
 }
 
 .pager .back,
-.pager .next {
-  flex: 1 1 0;
+.pager .next,
+#page-load .file-label.next {
   min-height: 56px;
   padding: var(--pad);
   font-size: 16px;
 }
 
-.pager .next.primary {
+.pager .back,
+.pager .next {
+  flex: 1 1 0;
+}
+
+.pager .next.primary,
+#page-load .file-label.next.primary {
   font-size: 18px;
 }
 

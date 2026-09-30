@@ -7,8 +7,10 @@
   import RangesPage from "./components/RangesPage.svelte";
   import StemsPage from "./components/StemsPage.svelte";
   import { loadConfig, startPolling } from "./lib/jobs.js";
-  import { goLoad, goProcess, goRanges, goStemsTab } from "./lib/nav.js";
+  import { analysisSettled, goLoad, goProcess, goRanges, goStemsTab } from "./lib/nav.js";
   import { session, steps } from "./lib/state.svelte.js";
+
+  const waiting = $derived(!!session.file && !analysisSettled());
 
   onMount(() => {
     const stop = startPolling();
@@ -71,6 +73,7 @@
           class="step"
           id="step-stems"
           aria-current={session.step === "stems" ? "step" : undefined}
+          disabled={waiting}
           onclick={goStemsTab}>Stems</button
         >
         <button
@@ -78,6 +81,7 @@
           class="step"
           id="step-ranges"
           aria-current={session.step === "ranges" ? "step" : undefined}
+          disabled={waiting}
           onclick={goRanges}>Ranges</button
         >
         <button

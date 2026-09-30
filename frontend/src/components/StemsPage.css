@@ -141,19 +141,17 @@
   color: var(--amber);
 }
 
-.custom-sources {
+.custom-sources,
+.quality,
+.output-preview {
   display: flex;
   flex-direction: column;
   gap: var(--stack);
 }
 
-.quality legend {
-  color: var(--secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.custom-sources legend {
+.custom-sources legend,
+.quality legend,
+.output-preview strong {
   margin: 0;
   padding: 0;
   color: var(--ink);
@@ -165,7 +163,7 @@
 .source-toggles label,
 .quality label {
   display: flex;
-  gap: 8px;
+  gap: var(--stack);
   align-items: center;
   color: var(--ink);
   font-size: 13px;
@@ -186,11 +184,10 @@
   flex-direction: row;
 }
 
-.quality {
+.quality-fields {
   display: grid;
   grid-template-columns: minmax(240px, 2fr) minmax(150px, 1.3fr) minmax(160px, 1.4fr) minmax(72px, 0.7fr) minmax(80px, 0.7fr);
   gap: var(--gap);
-  margin-top: var(--gap);
 }
 
 .quality select {
@@ -198,42 +195,23 @@
   min-width: 0;
 }
 
-.quality legend,
-.quality .note {
-  grid-column: 1 / -1;
-}
-
 .quality label {
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
-  color: var(--secondary);
-  font-size: 12px;
-}
-
-.output-preview {
-  padding: 16px 16px 18px;
-  background: var(--deck);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.output-preview strong {
-  display: block;
-  margin-bottom: var(--stack);
-  font-size: 12px;
+  gap: var(--stack);
+  color: var(--ink);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .output-files {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--stack);
 }
 
 .output-file {
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
   font-size: 13px;
   background: var(--face);
   border: 1px solid var(--line);
@@ -242,13 +220,13 @@
 
 .output-file small {
   display: block;
-  margin-top: 2px;
+  margin-top: var(--stack);
   color: var(--secondary);
   font-size: 12px;
 }
 
 @media (max-width: 700px) {
-  .quality {
+  .quality-fields {
     grid-template-columns: 1fr;
   }
 

@@ -22,7 +22,13 @@ MIGRATED_COLUMNS = {
     "range_start": "REAL",
     "range_end": "REAL",
     "ranges": "TEXT",
+    "bpm": "REAL",
+    "camelot": "TEXT",
+    "key_name": "TEXT",
+    "downbeat": "REAL",
+    "analysis_warning": "TEXT",
 }
+ANALYSIS_FIELDS = {"status", "stage", "error", "bpm", "camelot", "key_name", "downbeat", "warning"}
 
 
 @contextmanager
@@ -48,19 +54,30 @@ def database():
                 "UPDATE jobs SET model='htdemucs_ft', vocals='ensemble', "
                 "instruments_from='residual' WHERE model='roformer_htdemucs_ft'"
             )
+        db.execute("""CREATE TABLE IF NOT EXISTS analyses (
+            id TEXT PRIMARY KEY, status TEXT NOT NULL, stage TEXT NOT NULL,
+            error TEXT, bpm REAL, camelot TEXT, key_name TEXT, downbeat REAL,
+            warning TEXT, created REAL NOT NULL, updated REAL NOT NULL)""")
         yield db
 
 
-def create(job_id, filename, info, quality, mode="all", keep=None, section=None, ranges=None):
+def create(
+    job_id, filename, info, quality, mode="all", keep=None, section=None, ranges=None, analysis=None
+):
     now = time.time()
+    analysis = analysis or {}
+    bpm = analysis.get("bpm")
+    if bpm is not None:
+        bpm = round(float(bpm), 2)
     with database() as db:
         db.execute(
             "INSERT INTO jobs "
             "(id, filename, status, stage, created, updated, duration, sample_rate, channels, "
             "error, task_id, mode, keep, model, vocals, instruments_from, shifts, overlap, "
-            "range_start, range_end, ranges) VALUES "
+            "range_start, range_end, ranges, bpm, camelot, key_name, downbeat, "
+            "analysis_warning) VALUES "
             "(?, ?, 'queued', 'Waiting for worker', ?, ?, ?, ?, ?, NULL, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 job_id,
                 filename,
@@ -79,6 +96,11 @@ def create(job_id, filename, info, quality, mode="all", keep=None, section=None,
                 quality["overlap"],
                 *(section or (None, None)),
                 json.dumps(ranges) if ranges else None,
+                bpm,
+                analysis.get("camelot"),
+                analysis.get("key_name"),
+                analysis.get("downbeat"),
+                analysis.get("analysis_warning"),
             ),
         )
     return get(job_id)
@@ -160,3 +182,28 @@ def recover_stale():
 def delete(job_id):
     with database() as db:
         db.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+
+
+def create_analysis(analysis_id):
+    now = time.time()
+    with database() as db:
+        db.execute(
+            "INSERT INTO analyses (id, status, stage, error, created, updated) "
+            "VALUES (?, 'running', 'Checking the file', NULL, ?, ?)",
+            (analysis_id, now, now),
+        )
+    return get_analysis(analysis_id)
+
+
+def get_analysis(analysis_id):
+    with database() as db:
+        row = db.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_analysis(analysis_id, **values):
+    assert values.keys() <= ANALYSIS_FIELDS
+    values["updated"] = time.time()
+    query = "UPDATE analyses SET " + ", ".join(f"{key} = ?" for key in values) + " WHERE id = ?"
+    with database() as db:
+        return db.execute(query, [*values.values(), analysis_id]).rowcount == 1

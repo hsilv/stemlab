@@ -5,3 +5,11 @@ export function duration(seconds) {
 export function clock(seconds) {
   return `${duration(seconds)}.${Math.floor((seconds % 1) * 10)}`;
 }
+
+export function readingLine(bpm, camelot, keyName) {
+  const parts = [];
+  if (bpm != null && bpm !== "") parts.push(`${Number(bpm).toFixed(2)} BPM`);
+  if (camelot && keyName) parts.push(`${camelot} · ${keyName}`);
+  else if (camelot || keyName) parts.push(camelot || keyName);
+  return parts.join(" · ");
+}
