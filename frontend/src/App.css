@@ -1,0 +1,219 @@
+header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--deck);
+}
+
+.brand {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.local {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.booth {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--gap);
+  min-height: calc(100vh - 48px);
+  padding: var(--pad);
+}
+
+main {
+  min-width: 0;
+  padding: var(--pad);
+}
+
+.intro h1 {
+  margin: 0 0 var(--stack);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.intro p {
+  max-width: 68ch;
+}
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.step {
+  padding: 0 var(--space-2) var(--pad);
+  color: var(--secondary);
+  font: inherit;
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.step[aria-current="step"] {
+  color: var(--ink);
+}
+
+.step-mark {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 25%;
+  height: 2px;
+  background: var(--amber);
+  transform: translateX(0);
+  transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding-top: var(--gap);
+}
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+  max-width: 68ch;
+}
+
+.page h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.page.is-on {
+  animation: wipe-in 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.page.is-on.back {
+  animation-name: wipe-back;
+}
+
+@keyframes wipe-in {
+  from {
+    clip-path: inset(0 0 0 14%);
+    filter: blur(5px);
+  }
+  to {
+    clip-path: inset(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes wipe-back {
+  from {
+    clip-path: inset(0 14% 0 0);
+    filter: blur(5px);
+  }
+  to {
+    clip-path: inset(0);
+    filter: blur(0);
+  }
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+  margin-top: 0;
+}
+
+.pager .back,
+.pager .next {
+  flex: 1 1 0;
+  min-height: 56px;
+  padding: var(--pad);
+  font-size: 16px;
+}
+
+.pager .next.primary {
+  font-size: 18px;
+}
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--gap);
+  padding: 0 var(--pad) var(--pad);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+#message {
+  margin: 12px 0 0;
+  color: var(--error);
+  font-size: 13px;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: var(--gap);
+  padding-top: var(--pad);
+  color: var(--secondary);
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 700px) {
+  .booth {
+    grid-template-columns: 1fr;
+  }
+
+  main {
+    order: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page.is-on,
+  .page.is-on.back {
+    animation: none;
+  }
+
+  .step-mark {
+    transition: none;
+  }
+}

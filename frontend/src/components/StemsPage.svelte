@@ -1,4 +1,5 @@
 <script>
+  import "./StemsPage.css";
   import {
     instrumentSourceNames,
     modeNames,
@@ -143,7 +144,9 @@
     </fieldset>
   </fieldset>
   <div class="pager">
-    <button type="button" id="back-load" onclick={goLoad}>Back</button>
-    <button type="button" id="to-ranges" disabled={blocked} onclick={goRanges}>Set ranges</button>
+    <button type="button" id="back-load" class="back" onclick={goLoad}>Back</button>
+    <button type="button" id="to-ranges" class="next" class:primary={!blocked} disabled={blocked} onclick={goRanges}
+      >Set ranges</button
+    >
   </div>
 </div>

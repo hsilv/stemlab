@@ -1,4 +1,5 @@
 <script>
+  import "./RangesPage.css";
   import { onMount } from "svelte";
   import { clock } from "../lib/format.js";
   import { separate } from "../lib/jobs.js";
@@ -11,6 +12,9 @@
     addRange,
     clearRanges,
     importRekordbox,
+    moveRangeEdge,
+    moveSelectionEdge,
+    nudgeSelectionEdge,
     pickTime,
     removeRange,
     setSection,
@@ -41,10 +45,57 @@
     if (canvas?.clientWidth) drawWaveform(canvas, session.wave.peaks);
   }
 
+  let suppressClick = false;
+
+  function timeAt(clientX) {
+    const box = document.getElementById("wave").getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+    return ratio * session.wave.duration;
+  }
+
   function pickOnWave(event) {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
     if (!session.wave) return;
     const box = document.getElementById("wave").getBoundingClientRect();
     pickTime(((event.clientX - box.left) / box.width) * session.wave.duration);
+  }
+
+  function stopEdgeClick(event) {
+    event.stopPropagation();
+    suppressClick = false;
+  }
+
+  function beginDrag(event, apply) {
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    const move = (pointer) => apply(timeAt(pointer.clientX));
+    const finish = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      suppressClick = true;
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
+  function nudge(edge, event, index = -1) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = (event.shiftKey ? 1 : 0.1) * (event.key === "ArrowLeft" ? -1 : 1);
+    if (index < 0) nudgeSelectionEdge(edge, step);
+    else {
+      const range = session.ranges[index];
+      const current = edge === "from" ? +range.from : +range.to;
+      moveRangeEdge(index, edge, current + step);
+    }
   }
 
   $effect(() => {
@@ -81,13 +132,30 @@
       <canvas id="wave"></canvas>
       {#if session.wave}
         <div id="bands">
-          {#each session.ranges as range (`${range.from}|${range.to}`)}
+          {#each session.ranges as range, index (index)}
             <div
               class="band"
               class:arrive={session.flash === `${range.from}|${range.to}`}
               style:left={percent(+range.from)}
               style:right={`${100 - (+range.to / session.wave.duration) * 100}%`}
-            ></div>
+            >
+              <button
+                type="button"
+                class="edge start"
+                aria-label="Range start, {clock(+range.from)}"
+                onpointerdown={(event) => beginDrag(event, (time) => moveRangeEdge(index, "from", time))}
+                onclick={stopEdgeClick}
+                onkeydown={(event) => nudge("from", event, index)}
+              ></button>
+              <button
+                type="button"
+                class="edge end"
+                aria-label="Range end, {clock(+range.to)}"
+                onpointerdown={(event) => beginDrag(event, (time) => moveRangeEdge(index, "to", time))}
+                onclick={stopEdgeClick}
+                onkeydown={(event) => nudge("to", event, index)}
+              ></button>
+            </div>
           {/each}
         </div>
         <div
@@ -96,7 +164,24 @@
           hidden={session.from === "" && session.to === ""}
           style:left={percent(session.from === "" ? 0 : +session.from)}
           style:right={`${100 - (session.to === "" ? 100 : (+session.to / session.wave.duration) * 100)}%`}
-        ></div>
+        >
+          <button
+            type="button"
+            class="edge start"
+            aria-label="Section start"
+            onpointerdown={(event) => beginDrag(event, (time) => moveSelectionEdge("from", time))}
+            onclick={stopEdgeClick}
+            onkeydown={(event) => nudge("from", event)}
+          ></button>
+          <button
+            type="button"
+            class="edge end"
+            aria-label="Section end"
+            onpointerdown={(event) => beginDrag(event, (time) => moveSelectionEdge("to", time))}
+            onclick={stopEdgeClick}
+            onkeydown={(event) => nudge("to", event)}
+          ></button>
+        </div>
         <div id="markers">
           {#each cues as cue (`${cue.label}|${cue.time}`)}
             <button
@@ -193,15 +278,16 @@
     ></audio>
     <p id="cue-note" class="note" aria-live="polite">
       Click a cue on the waveform (first click sets the start, second sets the end),
-      pick a stretch between cues, or type times in seconds, then add the range. WAV
+      drag either edge to adjust it, pick a stretch between cues, or type times in
+      seconds, then add the range. WAV
       cue markers and Mixxx hot cues are read automatically; for Rekordbox, export your
       collection as XML and add it here.
     </p>
     <p id="section-effect" class="note" aria-live="polite">{effect}</p>
   </fieldset>
   <div class="pager">
-    <button type="button" id="back-stems" onclick={() => showPage("stems")}>Back</button>
-    <button type="button" id="separate" class="primary" disabled={blocked} onclick={separate}
+    <button type="button" id="back-stems" class="back" onclick={() => showPage("stems")}>Back</button>
+    <button type="button" id="separate" class="next primary" disabled={blocked} onclick={separate}
       >Separate track</button
     >
   </div>

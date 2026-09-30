@@ -1,0 +1,249 @@
+.range-work {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  border-right: 1px solid var(--amber);
+  border-left: 1px solid var(--amber);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.band.arrive {
+  animation: band-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes band-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.range-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.range-list:empty {
+  display: none;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--deck);
+  border: 1px solid var(--line);
+}
+
+.timeline {
+  position: relative;
+  height: 148px;
+  background: var(--deck);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#wave {
+  display: block;
+  width: 100%;
+  height: 148px;
+}
+
+.selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  border-right: 1px solid var(--amber);
+  border-left: 1px solid var(--amber);
+  pointer-events: none;
+}
+
+.edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 3;
+}
+
+.edge.start {
+  left: 0;
+}
+
+.edge.end {
+  right: 0;
+}
+
+.edge::before {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: 22px;
+  width: 2px;
+  background: var(--amber);
+}
+
+.edge.start::before {
+  left: 0;
+}
+
+.edge.end::before {
+  right: 0;
+}
+
+.edge:hover::before,
+.edge:focus-visible::before {
+  box-shadow: 0 0 8px var(--amber);
+}
+
+#markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  pointer-events: auto;
+}
+
+.marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.marker::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: var(--amber);
+}
+
+.segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.segments:empty {
+  display: none;
+}
+
+.chip {
+  padding: 6px 8px;
+  color: var(--secondary);
+  font-size: 12px;
+  background: var(--deck);
+}
+
+.chip.active {
+  color: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--amber) 45%, transparent);
+}
+
+.transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 8px;
+}
+
+.time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.time input {
+  width: 12ch;
+}
+
+#output-summary {
+  flex: 1;
+  text-align: right;
+}
+
+.section-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-notes .file-label {
+  align-self: flex-start;
+}
+
+@media (max-width: 700px) {
+  .transport {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #preview,
+  #clear,
+  #separate {
+    width: 100%;
+  }
+
+  #output-summary,
+  #separate {
+    grid-column: 1 / -1;
+  }
+
+  #output-summary {
+    flex-basis: 100%;
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .band.arrive {
+    animation: none;
+  }
+}

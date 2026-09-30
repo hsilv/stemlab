@@ -34,6 +34,7 @@ export const session = $state({
   connectionError: false,
   message: "",
   actionPending: false,
+  tags: null,
 });
 
 export function showPage(next) {

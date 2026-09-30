@@ -1,0 +1,221 @@
+@font-face {
+  font-family: Barlow;
+  src: url("/fonts/barlow-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Barlow;
+  src: url("/fonts/barlow-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Barlow;
+  src: url("/fonts/barlow-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --deck: #0c0c0e;
+  --panel: #10100e;
+  --face: #1a1916;
+  --ink: #f2f0ea;
+  --secondary: #d5d3ce;
+  --line: #2e2d29;
+  --amber: #e0a15a;
+  --vocals: #e0a15a;
+  --drums: #d4654a;
+  --bass: #3f8f78;
+  --other: #8b87b0;
+  --error: #e7a090;
+  --radius: 14px;
+  --radius-control: 10px;
+  --neon: 0 0 18px color-mix(in srgb, var(--amber) 55%, transparent);
+  --space: 4px;
+  --space-2: calc(var(--space) * 2);
+  --space-3: calc(var(--space) * 3);
+  --space-4: calc(var(--space) * 4);
+  --space-5: calc(var(--space) * 5);
+  --gap: var(--space-5);
+  --pad: var(--space-5);
+  --stack: var(--space-3);
+  font-family: Barlow, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  font-variant-numeric: tabular-nums;
+  background: var(--deck);
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--deck);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+::selection {
+  background: var(--face);
+  color: var(--ink);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) var(--deck);
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--deck);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 2px solid var(--deck);
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  box-shadow: var(--neon);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+button,
+.button,
+.file-label {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--face);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 8px 12px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:hover,
+.button:hover,
+.file-label:hover {
+  border-color: var(--secondary);
+}
+
+button:disabled,
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--amber);
+  color: var(--deck);
+  border-color: var(--amber);
+  font-weight: 600;
+  box-shadow: var(--neon);
+}
+
+.primary:hover {
+  border-color: var(--amber);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--amber) 70%, transparent);
+}
+
+.file-label {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.file-label input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.intro p,
+.note,
+#output-summary,
+.chosen {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  padding: 0;
+}
+
+select,
+input[type="number"] {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--deck);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 6px 8px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--secondary);
+}
+
+.error {
+  color: var(--error);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#app {
+  display: contents;
+}
+
+@media (max-width: 700px) {
+  :root {
+    --gap: var(--space-3);
+    --pad: var(--space-3);
+    --stack: var(--space-2);
+  }
+}

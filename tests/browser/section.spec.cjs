@@ -40,6 +40,15 @@ test("pick a section from cues on the waveform", async ({ page }) => {
   await expect(page.locator("#to")).toHaveValue("12");
   await expect(page.locator("#selection")).toBeVisible();
   await expect(page.locator(".chip.active")).toContainText("Intro → Drop");
+  const timeline = await page.locator("#timeline").boundingBox();
+  const end = await page.getByRole("button", { name: "Section end" }).boundingBox();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(timeline.x + timeline.width * 0.5, end.y + end.height / 2);
+  await page.mouse.up();
+  expect(Number(await page.inputValue("#from"))).toBe(4);
+  expect(Number(await page.inputValue("#to"))).toBeLessThan(12);
+  expect(Number(await page.inputValue("#to"))).toBeGreaterThan(4);
   await page.screenshot({ path: "test-results/section-picker.png", fullPage: true });
   await page.locator(".marker").nth(0).click();
   await expect(page.locator("#from")).toHaveValue("4");

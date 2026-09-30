@@ -1,0 +1,88 @@
+.crate {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: calc(100vh - 48px - 32px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#count {
+  color: var(--secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#history {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+#history > .note {
+  margin: 0;
+  padding: 12px;
+}
+
+.track {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 16px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.track strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.track small {
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.track.selected {
+  background: var(--face);
+}
+
+@media (max-width: 700px) {
+  .crate {
+    order: 1;
+    min-height: 0;
+    border: 1px solid var(--line);
+  }
+
+  #history {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .track {
+    flex: 0 0 220px;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+}

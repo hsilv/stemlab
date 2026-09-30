@@ -26,7 +26,7 @@ The two extras are mutually exclusive. Always include the chosen extra when invo
 
 ## Use the app
 
-1. Choose or drop a mono/stereo WAV or MP3 (up to 200 MB and 15 minutes by default).
+1. Choose or drop a mono/stereo WAV or MP3 (up to 200 MB and 15 minutes by default). When the file has tags, the title, artist, album, genre, year, and cover show on this step. They are read in the browser.
 2. Choose an output mode. In **Custom mix**, check the sounds to keep together; unchecked sounds are excluded. The output preview updates immediately.
 3. Click **Separate track**. Upload progress and processing stages appear in the UI.
 4. Select a track in history to preview the original and your selected outputs, or download the ZIP.

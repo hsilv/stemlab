@@ -25,6 +25,58 @@ export function setSection(from, to) {
   session.to = to;
 }
 
+function tenth(time) {
+  return Math.round(time * 10) / 10;
+}
+
+function clampEdge(time, other, edge) {
+  const limit = session.wave?.duration ?? 0;
+  let value = Math.min(limit, Math.max(0, tenth(time)));
+  if (other === "") return value;
+  const bound = +other;
+  value =
+    edge === "from"
+      ? Math.min(value, tenth(bound - 0.1))
+      : Math.max(value, tenth(bound + 0.1));
+  return Math.min(limit, Math.max(0, tenth(value)));
+}
+
+export function moveSelectionEdge(edge, time) {
+  const value = String(clampEdge(time, edge === "from" ? session.to : session.from, edge));
+  if (edge === "from") session.from = value;
+  else session.to = value;
+}
+
+export function nudgeSelectionEdge(edge, delta) {
+  const current =
+    edge === "from"
+      ? session.from === ""
+        ? 0
+        : +session.from
+      : session.to === ""
+        ? (session.wave?.duration ?? 0)
+        : +session.to;
+  moveSelectionEdge(edge, current + delta);
+}
+
+export function moveRangeEdge(index, edge, time) {
+  const range = session.ranges[index];
+  if (!range || !session.wave) return;
+  let from = +range.from;
+  let to = +range.to;
+  if (edge === "from") from = Math.min(tenth(time), tenth(to - 0.1));
+  else to = Math.max(tenth(time), tenth(from + 0.1));
+  from = Math.max(0, tenth(from));
+  to = Math.min(session.wave.duration, tenth(to));
+  const others = session.ranges
+    .filter((_, item) => item !== index)
+    .map((item) => [+item.from, +item.to]);
+  if (spanError(from, to, others, session.wave)) return;
+  session.ranges = session.ranges.map((item, itemIndex) =>
+    itemIndex === index ? { from: String(from), to: String(to) } : item,
+  );
+}
+
 export function pickTime(time) {
   const from = session.from;
   const to = session.to;

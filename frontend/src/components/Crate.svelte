@@ -1,4 +1,5 @@
 <script>
+  import "./Crate.css";
   import { duration } from "../lib/format.js";
   import { modeNames } from "../lib/labels.js";
   import { openJob } from "../lib/nav.js";

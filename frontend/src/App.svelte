@@ -1,4 +1,5 @@
 <script>
+  import "./App.css";
   import { onMount } from "svelte";
   import Crate from "./components/Crate.svelte";
   import LoadPage from "./components/LoadPage.svelte";

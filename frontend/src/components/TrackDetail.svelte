@@ -1,4 +1,5 @@
 <script>
+  import "./TrackDetail.css";
   import { duration } from "../lib/format.js";
   import { runJobAction } from "../lib/jobs.js";
   import {

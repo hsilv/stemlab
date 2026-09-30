@@ -1,4 +1,5 @@
 <script>
+  import "./ProcessPage.css";
   import TrackDetail from "./TrackDetail.svelte";
   import { session } from "../lib/state.svelte.js";
 </script>

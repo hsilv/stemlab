@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { activeStatuses } from "./labels.js";
 import { chosenSources, spanError } from "./plan.js";
+import { clearTags } from "./deck.js";
 import { resetSection } from "./section.js";
 import { session, showPage } from "./state.svelte.js";
 
@@ -148,6 +149,7 @@ export function separate() {
         );
       session.selectedId = result.id;
       session.file = null;
+      clearTags();
       resetSection();
       const input = document.getElementById("file");
       if (input) input.value = "";
