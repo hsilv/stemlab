@@ -33,11 +33,13 @@ test("upload, separate, preview, download, reload, delete on desktop and mobile"
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Hear every layer." }),
+    page.getByRole("heading", { name: "Load a track." }),
   ).toBeVisible();
   await page
     .locator("#file")
     .setInputFiles({ name: filename, mimeType: "audio/wav", buffer: wav() });
+  await page.getByRole("button", { name: "Choose stems" }).click();
+  await page.getByRole("button", { name: "Set ranges" }).click();
   await page.getByRole("button", { name: "Separate track" }).click();
   await expect(page.locator("#detail h2")).toHaveText(filename);
   await expect(page.locator("#detail .badge")).toHaveText("completed", {
@@ -63,20 +65,21 @@ test("upload, separate, preview, download, reload, delete on desktop and mobile"
     filename.replace(".wav", "-stems.zip"),
   );
   await page.reload();
+  await page.getByRole("button", { name: "Process", exact: true }).click();
   await expect(page.locator("#detail .badge")).toHaveText("completed");
   await page.screenshot({
     path: "test-results/stemlab-desktop.png",
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    page.getByRole("button", { name: "Separate track" }),
-  ).toBeVisible();
+  await expect(page.locator("#detail")).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole("button", { name: "Load", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Choose a file" })).toBeVisible();
   await page.screenshot({
     path: "test-results/stemlab-mobile.png",
     fullPage: true,
@@ -98,6 +101,8 @@ test("invalid file displays an actionable error", async ({ page }) => {
       mimeType: "audio/wav",
       buffer: Buffer.from("invalid"),
     });
+  await page.getByRole("button", { name: "Choose stems" }).click();
+  await page.getByRole("button", { name: "Set ranges" }).click();
   await page.getByRole("button", { name: "Separate track" }).click();
   await expect(page.getByRole("alert")).toContainText("readable WAV");
 });

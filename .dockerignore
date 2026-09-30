@@ -10,5 +10,7 @@ tests
 *.mp3
 *.flac
 node_modules
+frontend/dist
+src/stemlab/web/ui
 test-results
 playwright-report

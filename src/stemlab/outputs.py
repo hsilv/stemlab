@@ -5,6 +5,11 @@ MODES = ("all", "vocals", "instrumental", "custom")
 LABELS = {"vocals": "Vocals", "drums": "Drums", "bass": "Bass", "other": "Other instruments"}
 
 
+def is_instrumental(plan):
+    """True when the output is exactly drums + bass + other summed: the inverse of the vocals."""
+    return len(plan) == 1 and set(plan[0]["sources"]) == set(STEMS[1:])
+
+
 def output_plan(mode="all", keep=None):
     if mode not in MODES:
         raise ValueError("Unknown separation mode.")

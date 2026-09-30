@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from stemlab import jobs
 from stemlab.config import settings
 from stemlab.main import app
-from stemlab.worker import separate_job
+from stemlab.worker import range_options, separate_job
 
 
 @pytest.fixture
@@ -277,3 +277,132 @@ def test_reject_disguised_mp3_and_mp3_duration_limit(client, monkeypatch):
         client.post("/api/jobs?filename=long.mp3", content=wav(format="MP3", seconds=2)).status_code
         == 422
     )
+
+
+def test_quality_persists_through_retry_and_defaults_to_settings(client):
+    default = upload(client).json()
+    assert (default["model"], default["vocals"], default["instruments_from"]) == (
+        settings.model,
+        settings.vocals,
+        settings.instruments_from,
+    )
+    assert (default["shifts"], default["overlap"]) == (settings.shifts, settings.overlap)
+    query = "model=ft_mmi&vocals=bs&instruments_from=mix&shifts=4&overlap=0.75"
+    row = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav()).json()
+    chosen = ("ft_mmi", "bs", "mix", 4, 0.75)
+    assert (
+        tuple(row[k] for k in ("model", "vocals", "instruments_from", "shifts", "overlap"))
+        == chosen
+    )
+    jobs.update(row["id"], status="failed")
+    client.post(f"/api/jobs/{row['id']}/retry")
+    saved = jobs.get(row["id"])
+    assert (
+        tuple(saved[k] for k in ("model", "vocals", "instruments_from", "shifts", "overlap"))
+        == chosen
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "model=other",
+        "model=roformer_htdemucs_ft",
+        "vocals=other",
+        "instruments_from=other",
+        "shifts=-1",
+        "shifts=6",
+        "overlap=0",
+        "overlap=1",
+    ],
+)
+def test_invalid_quality_rejected_before_upload(client, query):
+    response = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav())
+    assert response.status_code == 422
+    assert client.get("/api/jobs").json() == []
+
+
+def test_section_persists_through_retry_and_whole_track_has_none(client):
+    assert upload(client).json()["range_start"] is None
+    row = client.post("/api/jobs?filename=track.wav&start=0.1&end=1.1", content=wav()).json()
+    assert (row["range_start"], row["range_end"]) == (0.1, 1.1)
+    jobs.update(row["id"], status="failed")
+    client.post(f"/api/jobs/{row['id']}/retry")
+    saved = jobs.get(row["id"])
+    assert (saved["range_start"], saved["range_end"]) == (0.1, 1.1)
+    open_ended = client.post("/api/jobs?filename=track.wav&start=0.1", content=wav()).json()
+    assert open_ended["range_end"] == pytest.approx(1.1)
+
+
+@pytest.mark.parametrize(
+    "query", ["start=0.5&end=1.2", "start=0.9&end=0.5", "start=0.5&end=0.6", "start=-1", "end=0"]
+)
+def test_invalid_section_rejected_and_cleaned_up(client, query):
+    response = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav(seconds=1.1))
+    assert response.status_code == 422
+    assert client.get("/api/jobs").json() == []
+    assert not any(path.is_dir() for path in settings.data_dir.iterdir())
+
+
+@pytest.mark.parametrize(
+    "query,status",
+    [
+        ("mode=instrumental&instruments_from=inverse", 202),
+        ("mode=custom&keep=drums,bass,other&instruments_from=inverse", 202),
+        ("mode=all&instruments_from=inverse", 422),
+        ("mode=vocals&instruments_from=inverse", 422),
+        ("mode=custom&keep=vocals,bass&instruments_from=inverse", 422),
+    ],
+)
+def test_mix_minus_vocals_only_for_no_vocals_outputs(client, query, status):
+    response = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav())
+    assert response.status_code == status
+    if status == 202:
+        assert response.json()["instruments_from"] == "inverse"
+    else:
+        assert client.get("/api/jobs").json() == []
+
+
+def test_range_options_cover_one_section_several_ranges_or_the_whole_track():
+    assert range_options({"ranges": None, "range_start": None, "range_end": None}) == []
+    assert range_options({"ranges": None, "range_start": 0.1, "range_end": 1.1}) == [
+        "--start",
+        "0.1",
+        "--end",
+        "1.1",
+    ]
+    assert range_options({"ranges": [[0.0, 1.0], [2.0, 3.5]], "range_start": None}) == [
+        "--ranges",
+        "0.0-1.0,2.0-3.5",
+    ]
+
+
+def test_several_ranges_persist_through_retry(client):
+    row = client.post(
+        "/api/jobs?filename=track.wav&ranges=0-1,2-3.5", content=wav(seconds=10)
+    ).json()
+    assert row["range_start"] is None
+    assert row["ranges"] == [[0.0, 1.0], [2.0, 3.5]]
+    jobs.update(row["id"], status="failed")
+    client.post(f"/api/jobs/{row['id']}/retry")
+    assert jobs.get(row["id"])["ranges"] == [[0.0, 1.0], [2.0, 3.5]]
+    single = client.post("/api/jobs?filename=track.wav&ranges=0.1-1.1", content=wav()).json()
+    assert (single["range_start"], single["range_end"]) == (0.1, 1.1)
+    assert single["ranges"] == [[0.1, 1.1]]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "ranges=0-0.4",
+        "ranges=0-2",
+        "ranges=0-1,0.5-2",
+        "ranges=nope",
+        "start=0.1&end=1.1&ranges=0-1,2-3",
+    ],
+)
+def test_invalid_ranges_rejected_and_cleaned_up(client, query):
+    response = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav(seconds=1.1))
+    assert response.status_code == 422
+    assert client.get("/api/jobs").json() == []
+    assert not any(path.is_dir() for path in settings.data_dir.iterdir())

@@ -11,7 +11,12 @@ from stemlab.routes import router
 
 app = FastAPI(title="StemLab", version="1.0.0", description="Local WAV/MP3 separation and mixing")
 app.include_router(router)
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web"), name="static")
+
+UI_DIR = Path(__file__).parent / "web" / "ui"
+for asset in ("assets", "fonts"):
+    directory = UI_DIR / asset
+    if directory.is_dir():
+        app.mount(f"/{asset}", StaticFiles(directory=directory), name=asset)
 
 
 @app.middleware("http")
@@ -26,7 +31,13 @@ async def local_write_protection(request: Request, call_next):
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(Path(__file__).parent / "web" / "index.html")
+    page = UI_DIR / "index.html"
+    if not page.is_file():
+        return JSONResponse(
+            {"detail": "Interface build missing. In frontend/, run npm ci && npm run build."},
+            status_code=503,
+        )
+    return FileResponse(page)
 
 
 @app.get("/health/live")

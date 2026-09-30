@@ -11,5 +11,7 @@ data/
 *.flac
 .DS_Store
 node_modules/
+frontend/dist/
+src/stemlab/web/ui/
 test-results/
 playwright-report/

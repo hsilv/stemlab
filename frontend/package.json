@@ -1,0 +1,14 @@
+{
+  "name": "stemlab-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && mkdir -p ../src/stemlab/web && rm -rf ../src/stemlab/web/ui && cp -a dist ../src/stemlab/web/ui"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "svelte": "^5.57.1",
+    "vite": "^8.3.1"
+  }
+}

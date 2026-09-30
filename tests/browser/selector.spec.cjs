@@ -25,6 +25,7 @@ for (const [mode, label, output, format] of [
   }) => {
     const filename = `${mode}-${Date.now()}.${format.toLowerCase()}`;
     await page.goto("/");
+    await page.getByRole("button", { name: "Stems", exact: true }).click();
     await page.getByRole("radio", { name: new RegExp(label) }).check();
     if (mode === "custom") {
       await page
@@ -49,6 +50,7 @@ for (const [mode, label, output, format] of [
         mimeType: format === "MP3" ? "audio/mpeg" : "audio/wav",
         buffer: audio(format),
       });
+    await page.getByRole("button", { name: "Set ranges" }).click();
     const submitted = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -95,9 +97,11 @@ for (const [mode, label, output, format] of [
     );
     expect(names).toEqual([`${output}.wav`]);
     await page.reload();
+    await page.getByRole("button", { name: "Process", exact: true }).click();
     await expect(page.locator("#detail")).toContainText(`Output: ${label}`);
     await expect(page.locator("#detail audio")).toHaveCount(2);
     if (mode === "custom") {
+      await page.getByRole("button", { name: "Stems", exact: true }).click();
       await page.getByRole("radio", { name: /Custom mix/ }).check();
       await page
         .getByRole("checkbox", { name: "Drums", exact: true })
@@ -139,13 +143,12 @@ test("empty custom selection blocks submission and keyboard presets work", async
       mimeType: "audio/wav",
       buffer: audio("WAV"),
     });
+  await page.getByRole("button", { name: "Stems", exact: true }).click();
   await page.getByRole("radio", { name: /Custom mix/ }).check();
   for (const name of ["Vocals", "Drums", "Bass", "Other instruments"]) {
     await page.getByRole("checkbox", { name, exact: true }).uncheck();
   }
-  await expect(
-    page.getByRole("button", { name: "Separate track" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Set ranges" })).toBeDisabled();
   await expect(page.locator("#output-preview")).toContainText(
     "Select at least one sound",
   );
@@ -153,6 +156,8 @@ test("empty custom selection blocks submission and keyboard presets work", async
   await vocals.focus();
   await page.keyboard.press("Space");
   await expect(vocals).toBeChecked();
+  await expect(page.getByRole("button", { name: "Set ranges" })).toBeEnabled();
+  await page.getByRole("button", { name: "Set ranges" }).click();
   await expect(
     page.getByRole("button", { name: "Separate track" }),
   ).toBeEnabled();

@@ -47,6 +47,16 @@ def separate_job(self, job_id):
         run_job(job_id, self.request.id, lock.fileno())
 
 
+def range_options(row):
+    """CLI arguments for one section, several ranges, or the whole track."""
+    if row.get("ranges"):
+        encoded = ",".join(f"{start}-{end}" for start, end in row["ranges"])
+        return ["--ranges", encoded]
+    if row["range_start"] is not None:
+        return ["--start", str(row["range_start"]), "--end", str(row["range_end"])]
+    return []
+
+
 def run_job(job_id, task_id, lock_fd):
     if not jobs.claim(job_id, task_id):
         return
@@ -58,7 +68,21 @@ def run_job(job_id, task_id, lock_fd):
     try:
         row = jobs.get(job_id)
         plan = output_plan(row["mode"], row["keep"])
-        options = ["--mode", row["mode"]]
+        options = [
+            "--mode",
+            row["mode"],
+            "--model",
+            row["model"],
+            "--vocals",
+            row["vocals"],
+            "--instruments-from",
+            row["instruments_from"],
+            "--shifts",
+            str(row["shifts"]),
+            "--overlap",
+            str(row["overlap"]),
+        ]
+        options.extend(range_options(row))
         if row["keep"] is not None:
             options.extend(["--keep", ",".join(row["keep"])])
         shutil.rmtree(output, ignore_errors=True)

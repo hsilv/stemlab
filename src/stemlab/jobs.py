@@ -10,6 +10,19 @@ from uuid import uuid4
 from stemlab.config import settings
 
 TERMINAL = {"completed", "failed", "cancelled"}
+# Columns added after the first release. Defaults describe how older jobs were processed.
+MIGRATED_COLUMNS = {
+    "mode": "TEXT NOT NULL DEFAULT 'all'",
+    "keep": "TEXT",
+    "model": "TEXT NOT NULL DEFAULT 'htdemucs'",
+    "shifts": "INTEGER NOT NULL DEFAULT 0",
+    "overlap": "REAL NOT NULL DEFAULT 0.25",
+    "vocals": "TEXT NOT NULL DEFAULT 'demucs'",
+    "instruments_from": "TEXT NOT NULL DEFAULT 'mix'",
+    "range_start": "REAL",
+    "range_end": "REAL",
+    "ranges": "TEXT",
+}
 
 
 @contextmanager
@@ -24,24 +37,30 @@ def database():
             duration REAL NOT NULL, sample_rate INTEGER NOT NULL, channels INTEGER NOT NULL,
             error TEXT, task_id TEXT NOT NULL)""")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
-        if "mode" not in columns or "keep" not in columns:
+        if not MIGRATED_COLUMNS.keys() <= columns:
             db.execute("BEGIN IMMEDIATE")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
-            if "mode" not in columns:
-                db.execute("ALTER TABLE jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'all'")
-            if "keep" not in columns:
-                db.execute("ALTER TABLE jobs ADD COLUMN keep TEXT")
+            for name, definition in MIGRATED_COLUMNS.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+            # Jobs from when Roformer + Demucs was a single model choice.
+            db.execute(
+                "UPDATE jobs SET model='htdemucs_ft', vocals='ensemble', "
+                "instruments_from='residual' WHERE model='roformer_htdemucs_ft'"
+            )
         yield db
 
 
-def create(job_id, filename, info, mode="all", keep=None):
+def create(job_id, filename, info, quality, mode="all", keep=None, section=None, ranges=None):
     now = time.time()
     with database() as db:
         db.execute(
             "INSERT INTO jobs "
             "(id, filename, status, stage, created, updated, duration, sample_rate, channels, "
-            "error, task_id, mode, keep) VALUES "
-            "(?, ?, 'queued', 'Waiting for worker', ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+            "error, task_id, mode, keep, model, vocals, instruments_from, shifts, overlap, "
+            "range_start, range_end, ranges) VALUES "
+            "(?, ?, 'queued', 'Waiting for worker', ?, ?, ?, ?, ?, NULL, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 job_id,
                 filename,
@@ -53,6 +72,13 @@ def create(job_id, filename, info, mode="all", keep=None):
                 str(uuid4()),
                 mode,
                 json.dumps(keep) if keep is not None else None,
+                quality["model"],
+                quality["vocals"],
+                quality["instruments_from"],
+                quality["shifts"],
+                quality["overlap"],
+                *(section or (None, None)),
+                json.dumps(ranges) if ranges else None,
             ),
         )
     return get(job_id)
@@ -67,6 +93,7 @@ def get(job_id):
 def decode(row):
     result = dict(row)
     result["keep"] = json.loads(result["keep"]) if result["keep"] is not None else None
+    result["ranges"] = json.loads(result["ranges"]) if result.get("ranges") else None
     return result
 
 

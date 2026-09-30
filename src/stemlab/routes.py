@@ -9,12 +9,24 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
-from stemlab import jobs
-from stemlab.config import settings
-from stemlab.outputs import MODES, STEMS, output_plan
+from stemlab import jobs, mixxx
+from stemlab.config import (
+    INSTRUMENT_SOURCES,
+    MAX_SHIFTS,
+    MODELS,
+    OVERLAP_RANGE,
+    VOCAL_MODELS,
+    InstrumentsFrom,
+    Model,
+    Vocals,
+    settings,
+)
+from stemlab.inference import parse_ranges
+from stemlab.outputs import MODES, STEMS, is_instrumental, output_plan
 from stemlab.worker import separate_job
 
 router = APIRouter(prefix="/api")
+MIN_SECTION_SECONDS = 1
 
 
 @router.get("/config")
@@ -23,11 +35,26 @@ def config():
         "max_upload_mb": settings.max_upload_mb,
         "max_duration_seconds": settings.max_duration_seconds,
         "stems": STEMS,
-        "model": "htdemucs",
+        "models": MODELS,
+        "vocal_models": VOCAL_MODELS,
+        "instrument_sources": INSTRUMENT_SOURCES,
+        "defaults": {
+            "model": settings.model,
+            "vocals": settings.vocals,
+            "instruments_from": settings.instruments_from,
+            "shifts": settings.shifts,
+            "overlap": settings.overlap,
+        },
+        "max_shifts": MAX_SHIFTS,
         "device": settings.device,
         "modes": MODES,
         "input_formats": ["wav", "mp3"],
     }
+
+
+@router.get("/mixxx/cues")
+def mixxx_cues(filename: str = Query(min_length=1, max_length=240)):
+    return mixxx.hot_cues(filename)
 
 
 def require_job(job_id: UUID):
@@ -38,8 +65,12 @@ def require_job(job_id: UUID):
 
 
 def present(row):
+    spans = row["ranges"]
+    if not spans and row["range_start"] is not None:
+        spans = [[row["range_start"], row["range_end"]]]
     return {
         **{key: value for key, value in row.items() if key != "task_id"},
+        "ranges": spans,
         "outputs": output_plan(row["mode"], row["keep"]),
     }
 
@@ -86,17 +117,68 @@ def validate_audio(path):
         raise HTTPException(422, "This is not a readable WAV or MP3 file.") from exc
 
 
+def resolve_section(start, end, duration):
+    """Return (start, end) seconds to separate, or None for the whole track."""
+    if start is None and end is None:
+        return None
+    start, end = start or 0.0, end or duration
+    if end > duration:
+        raise HTTPException(422, "The section ends after the end of the track.")
+    if end - start < MIN_SECTION_SECONDS:
+        raise HTTPException(422, f"The section must be at least {MIN_SECTION_SECONDS} second long.")
+    return start, end
+
+
+MAX_RANGES = 12
+
+
+def resolve_ranges(spans, duration):
+    """Return sorted (start, end) pairs, or None when the effect covers the whole track."""
+    if not spans:
+        return None
+    if len(spans) > MAX_RANGES:
+        raise HTTPException(422, f"Choose at most {MAX_RANGES} ranges.")
+    resolved = []
+    for start, end in spans:
+        start = 0.0 if start is None else start
+        end = duration if end is None else end
+        if end > duration:
+            raise HTTPException(422, "A range ends after the end of the track.")
+        if end - start < MIN_SECTION_SECONDS:
+            raise HTTPException(
+                422, f"Each range must be at least {MIN_SECTION_SECONDS} second long."
+            )
+        resolved.append((start, end))
+    resolved.sort()
+    for previous, following in zip(resolved, resolved[1:]):
+        if following[0] < previous[1]:
+            raise HTTPException(
+                422, "Ranges overlap. Leave a gap between them, or make them one range."
+            )
+    return resolved
+
+
 @router.post("/jobs", status_code=202)
 async def upload(
     request: Request,
     filename: str = Query(min_length=1, max_length=240),
     mode: Literal["all", "vocals", "instrumental", "custom"] = "all",
     keep: str | None = Query(default=None, max_length=100),
+    model: Model = settings.model,
+    vocals: Vocals = settings.vocals,
+    instruments_from: InstrumentsFrom = settings.instruments_from,
+    shifts: int = Query(default=settings.shifts, ge=0, le=MAX_SHIFTS),
+    overlap: float = Query(default=settings.overlap, ge=OVERLAP_RANGE[0], le=OVERLAP_RANGE[1]),
+    start: float | None = Query(default=None, ge=0),
+    end: float | None = Query(default=None, gt=0),
+    ranges: str | None = Query(default=None, max_length=500),
 ):
     """Stream a raw WAV (audio/wav) or MP3 (audio/mpeg) request body."""
     sources = keep.split(",") if keep is not None else None
     try:
-        output_plan(mode, sources)
+        plan = output_plan(mode, sources)
+        if instruments_from == "inverse" and not is_instrumental(plan):
+            raise ValueError("Mix minus vocals only works for No vocals.")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     filename = filename.replace("\\", "/").split("/")[-1]
@@ -127,7 +209,38 @@ async def upload(
                     raise HTTPException(413, "The file exceeds the upload size limit.")
                 await run_in_threadpool(target.write, chunk)
         info = await run_in_threadpool(validate_audio, source)
-        row = await run_in_threadpool(jobs.create, job_id, filename, info, mode, sources)
+        if ranges and (start is not None or end is not None):
+            raise HTTPException(422, "Send either start and end, or ranges.")
+        section, stored_ranges = None, None
+        if ranges:
+            try:
+                parsed = parse_ranges(ranges)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            resolved = resolve_ranges(parsed, info.duration)
+            if resolved and len(resolved) == 1:
+                section = resolved[0]
+            else:
+                stored_ranges = resolved
+        else:
+            section = resolve_section(start, end, info.duration)
+        row = await run_in_threadpool(
+            jobs.create,
+            job_id,
+            filename,
+            info,
+            {
+                "model": model,
+                "vocals": vocals,
+                "instruments_from": instruments_from,
+                "shifts": shifts,
+                "overlap": overlap,
+            },
+            mode,
+            sources,
+            section,
+            stored_ranges,
+        )
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
         raise

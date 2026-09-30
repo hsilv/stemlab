@@ -12,8 +12,12 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix frontend
       - run: uv run pytest
-      - run: node --check src/stemlab/web/app.js
       - run: docker compose config --quiet
       - run: docker compose up --build --wait --wait-timeout 300
       - run: docker compose exec -T api python -c "from stemlab.worker import ping; assert ping.delay().get(timeout=30)['status'] == 'ok'"
