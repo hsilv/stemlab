@@ -103,6 +103,73 @@ export function refinePeaks(wave, start, end, columns) {
   return readCached(next, start, end, columns);
 }
 
+// Low, mid and high energy per bin, each scaled by its own loudest bin, as bins x 3 values.
+// The split is two one-pole filters (about 200 Hz and 2 kHz): enough to tell a kick from a hat.
+function bandEnergies(samples, sampleRate, bins) {
+  const bands = new Float32Array(bins * 3);
+  const lowCoef = 1 - Math.exp((-2 * Math.PI * 200) / sampleRate);
+  const midCoef = 1 - Math.exp((-2 * Math.PI * 2000) / sampleRate);
+  const size = samples.length / bins;
+  let low = 0;
+  let mid = 0;
+  for (let bin = 0; bin < bins; bin++) {
+    const start = Math.floor(bin * size);
+    const end = Math.floor((bin + 1) * size);
+    let sumLow = 0;
+    let sumMid = 0;
+    let sumHigh = 0;
+    for (let index = start; index < end; index++) {
+      const sample = samples[index];
+      low += lowCoef * (sample - low);
+      mid += midCoef * (sample - mid);
+      const band = mid - low;
+      const high = sample - mid;
+      sumLow += low * low;
+      sumMid += band * band;
+      sumHigh += high * high;
+    }
+    const count = Math.max(1, end - start);
+    bands[bin * 3] = Math.sqrt(sumLow / count);
+    bands[bin * 3 + 1] = Math.sqrt(sumMid / count);
+    bands[bin * 3 + 2] = Math.sqrt(sumHigh / count);
+  }
+  for (let band = 0; band < 3; band++) {
+    let loudest = 0;
+    for (let bin = 0; bin < bins; bin++) loudest = Math.max(loudest, bands[bin * 3 + band]);
+    if (loudest > 0) for (let bin = 0; bin < bins; bin++) bands[bin * 3 + band] /= loudest;
+  }
+  return bands;
+}
+
+function parseHex(color) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color.trim());
+  if (!match) return null;
+  const value = parseInt(match[1], 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+// The three band colours as [r, g, b] each, from hex strings; null when one is not a hex colour.
+export function bandPalette(low, mid, high) {
+  const palette = [parseHex(low), parseHex(mid), parseHex(high)];
+  return palette.every(Boolean) ? palette : null;
+}
+
+// The colour of the sound at a time: the band colours mixed by how much of each is there.
+export function bandColor(bands, time, duration, palette) {
+  const bins = bands.length / 3;
+  const bin = Math.max(0, Math.min(bins - 1, Math.floor((time / duration) * bins)));
+  // Squared, so the band that leads a moment shows instead of washing out into one hue.
+  const weights = [bands[bin * 3], bands[bin * 3 + 1], bands[bin * 3 + 2]].map((v) => v * v);
+  const total = weights[0] + weights[1] + weights[2];
+  if (!(total > 0)) return `rgb(${palette[1].join(",")})`;
+  const channel = (index) =>
+    Math.round(
+      (weights[0] * palette[0][index] + weights[1] * palette[1][index] + weights[2] * palette[2][index]) /
+        total,
+    );
+  return `rgb(${channel(0)},${channel(1)},${channel(2)})`;
+}
+
 export async function waveformOf(file, bins = 1500) {
   const context = new AudioContext();
   try {
@@ -118,6 +185,7 @@ export async function waveformOf(file, bins = 1500) {
     const scale = peakReference(raw) || 1;
     return {
       peaks: normalizePeaks(raw),
+      bands: bandEnergies(samples, audio.sampleRate, bins),
       duration: audio.duration,
       samples,
       sampleRate: audio.sampleRate,

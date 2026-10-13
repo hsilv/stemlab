@@ -1,4 +1,3 @@
-import fcntl
 import json
 import os
 import sys
@@ -8,6 +7,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from stemlab import filelock
 from stemlab.analysis import _separator, inference_lock, main, measure
 from stemlab.config import settings
 
@@ -86,7 +86,7 @@ def test_full_song_includes_a_long_quiet_intro():
         length = max(end - start, 0.0)
         if kind == "drums":
             return clicks(90.0, length)[:, None]
-        return tone(C_MAJOR, length)[:, None]
+        return tone(A_MINOR, length)[:, None]
 
     reading = measure(
         np.concatenate([quiet, later])[:, None],
@@ -99,26 +99,51 @@ def test_full_song_includes_a_long_quiet_intro():
     bar = 4.0 * 60.0 / reading.bpm
     expected = intro - np.floor(intro / bar) * bar
     assert reading.downbeat == pytest.approx(float(expected), abs=0.05)
+    assert calls[-1][0] == "harmonic"
     for kind, start, end in calls:
-        assert kind in {"drums", "instrumental"}
-        assert end - start == pytest.approx(45, abs=1)
+        assert kind in {"drums", "harmonic"}
+        if kind == "drums":
+            assert end - start == pytest.approx(45, abs=1)
+        else:
+            # The whole 56 seconds is shorter than a harmony window, so a slice is the whole song.
+            assert (start, end) == pytest.approx((0.0, intro + body), abs=0.05)
 
 
-def test_clear_mix_does_not_isolate():
+def test_clear_mix_still_asks_for_the_harmony_but_not_the_drums():
     wave = stereo(clicks(120, 12, amplitude=0.8) + tone(A_MINOR, 12, amplitude=0.5))
     calls = []
     stages = []
     reading = measure(wave, RATE, stages.append, lambda *args: calls.append(args))
-    assert calls == []
+    assert [call[0] for call in calls] == ["harmonic"]
     assert stages == ["Reading tempo and key"]
     assert reading.bpm == pytest.approx(120.0, abs=0.01)
+    # The separator gave nothing back, so the full mix answers.
     assert (reading.camelot, reading.key_name) == ("8A", "A minor")
     assert reading.downbeat == pytest.approx(0.0, abs=0.02)
     assert reading.warning == ""
-    assert set(reading.to_dict()) == {"bpm", "camelot", "key_name", "downbeat", "warning"}
+    assert set(reading.to_dict()) == {
+        "bpm",
+        "camelot",
+        "key_name",
+        "downbeat",
+        "warning",
+        "valence",
+        "energy",
+    }
 
 
-def test_tied_mix_isolates_drums():
+def test_isolated_harmony_decides_the_key_unless_it_is_a_close_call():
+    mix = stereo(clicks(120, 12, amplitude=0.8) + tone(A_MINOR, 12, amplitude=0.5))
+    stems = {"clean": tone(C_MAJOR, 12)[:, None], "noise": clicks(100, 12)[:, None]}
+    heard = {}
+    for name, stem in stems.items():
+        heard[name] = measure(mix, RATE, lambda _stage: None, lambda *_args, s=stem: s)
+    assert (heard["clean"].camelot, heard["clean"].key_name) == ("8B", "C major")
+    # Clicks have no harmony: that reading is a close call, so the full mix is kept.
+    assert (heard["noise"].camelot, heard["noise"].key_name) == ("8A", "A minor")
+
+
+def test_tied_mix_isolates_drums_then_harmony():
     duration = 30
     mixed = np.concatenate([clicks(100, duration), clicks(147, duration)])
     mixed = mixed + tone(A_MINOR, duration * 2, amplitude=0.35)
@@ -129,14 +154,69 @@ def test_tied_mix_isolates_drums():
         return None
 
     reading = measure(mixed[:, None], RATE, lambda _stage: None, separate_window)
-    assert len(calls) == 1
+    assert [call[0] for call in calls] == ["drums", "harmonic"]
     kind, start, end = calls[0]
-    assert kind == "drums"
     assert start >= 0
     assert end <= duration * 2 + 0.05
     assert end - start == pytest.approx(45, abs=1)
+    assert calls[1][2] - calls[1][1] == pytest.approx(60, abs=0.1)
     assert reading.warning == "Part of the track does not hold this grid."
     assert (reading.camelot, reading.key_name) == ("8A", "A minor")
+
+
+def dembow(bpm, duration, tresillo=0.7):
+    """A kick on every beat plus the 3-3-2 accents, which pull autocorrelation toward 4:3."""
+    beat = 60.0 / bpm
+    wave = np.zeros(int(round(duration * RATE)), dtype=np.float32)
+    count = 0
+    while count * beat < duration - 0.05:
+        for offset, level in ((0, 1.0), (0.75, tresillo), (1.5, tresillo)):
+            if count % 4 == 0 or offset == 0:
+                at = int(round((count + offset) * beat * RATE))
+                if at < len(wave) and (count % 2 == 0 or offset == 0):
+                    wave[at] = level
+        count += 1
+    return wave
+
+
+def test_beats_from_the_tracker_decide_the_pulse_and_the_bar():
+    bpm = 92.0
+    wave = dembow(bpm, 30)
+    beats = np.arange(0, 30, 60 / bpm)
+    # The network says the bar starts on the third beat of the first group of four.
+    downbeats = beats[2::4]
+    seen = {}
+
+    def track(samples, rate):
+        seen["rate"] = rate
+        return beats, downbeats
+
+    reading = measure(wave[:, None], RATE, lambda _stage: None, None, track)
+    assert seen["rate"] == RATE
+    assert reading.bpm == pytest.approx(bpm, abs=0.05)
+    assert reading.downbeat == pytest.approx(float(downbeats[0] % (4 * 60 / bpm)), abs=0.03)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, (np.array([0.5, 1.0]), np.array([0.5])), (np.arange(0, 12, 0.5)[:8], np.array([]))],
+)
+def test_a_tracker_that_finds_too_little_leaves_the_signal_reading(answer):
+    wave = clicks(120, 12)[:, None]
+    reading = measure(wave, RATE, lambda _stage: None, None, lambda *_args: answer)
+    assert reading.bpm == pytest.approx(120.0, abs=0.01)
+
+
+def test_downbeats_that_disagree_fall_back_to_the_onset_weight():
+    bpm = 120.0
+    wave = clicks(bpm, 20, amplitude=0.4)
+    wave[:: int(round(4 * 60 / bpm * RATE))] = 1.0  # a louder hit on every bar
+    beats = np.arange(0, 20, 60 / bpm)
+    scattered = beats[[1, 6, 11, 16, 21 - 1]]  # every phase of four, none a majority
+    reading = measure(
+        wave[:, None], RATE, lambda _stage: None, None, lambda *_a: (beats, scattered)
+    )
+    assert reading.downbeat == pytest.approx(0.0, abs=0.03)
 
 
 def test_inference_lock_is_exclusive(tmp_path, monkeypatch):
@@ -153,8 +233,7 @@ def test_inference_lock_is_exclusive(tmp_path, monkeypatch):
     assert started.wait(2)
     fd = os.open(tmp_path / "inference.lock", os.O_RDWR)
     try:
-        with pytest.raises(BlockingIOError):
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert not filelock.try_lock(fd)
     finally:
         os.close(fd)
         release.set()
@@ -180,12 +259,9 @@ def test_separator_holds_the_lock_while_isolating(tmp_path, monkeypatch):
     def fake_isolate(audio, _sample_rate, kind):
         fd = os.open(tmp_path / "inference.lock", os.O_RDWR)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            seen[kind] = True
-        else:
-            seen[kind] = False
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            seen[kind] = not filelock.try_lock(fd)
+            if not seen[kind]:
+                filelock.unlock(fd)
         finally:
             os.close(fd)
         return audio
@@ -195,19 +271,47 @@ def test_separator_holds_the_lock_while_isolating(tmp_path, monkeypatch):
     audio = np.zeros((RATE, 1), dtype=np.float32)
     separate_window = _separator(audio, RATE, stages.append)
     drums = separate_window("drums", 0.0, 1.0)
-    instrumental = separate_window("instrumental", 0.0, 1.0)
-    assert seen == {"drums": True, "instrumental": True}
-    assert drums.shape == instrumental.shape == (RATE, 1)
+    harmonic = separate_window("harmonic", 0.0, 1.0)
+    assert seen == {"drums": True, "harmonic": True}
+    assert drums.shape == harmonic.shape == (RATE, 1)
     assert stages == [
         "Waiting for the separator",
         "Isolating drums and bass",
         "Waiting for the separator",
-        "Isolating the instrumental",
+        "Isolating the harmony",
     ]
+
+
+def test_separator_gives_up_when_the_gpu_stays_busy(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr("stemlab.analysis._LOCK_WAIT_SECONDS", 0.6)
+    started, release = threading.Event(), threading.Event()
+
+    def hold():
+        with inference_lock():
+            started.set()
+            release.wait(5)
+
+    def refuse(*_args):
+        raise AssertionError("isolated while another job held the GPU")
+
+    monkeypatch.setattr("stemlab.inference.isolate_window", refuse)
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert started.wait(2)
+    try:
+        separate_window = _separator(np.zeros((RATE, 1), dtype=np.float32), RATE, lambda _s: None)
+        assert separate_window("harmonic", 0.0, 1.0) is None
+    finally:
+        release.set()
+        thread.join()
 
 
 def test_module_prints_json_and_does_not_lock_a_clear_mix(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
+    # No separator or network here: neither answers, so the signal alone is read.
+    monkeypatch.setattr("stemlab.analysis._separator", lambda *_args: lambda *_a: None)
+    monkeypatch.setattr("stemlab.analysis._beat_tracker", lambda _announce: lambda *_a: None)
     path = tmp_path / "clear.wav"
     wave = stereo(clicks(120, 12, amplitude=0.8) + tone(A_MINOR, 12, amplitude=0.5))
     sf.write(path, wave, RATE, subtype="FLOAT")
@@ -222,3 +326,47 @@ def test_module_prints_json_and_does_not_lock_a_clear_mix(tmp_path, monkeypatch,
     assert "STAGE:Reading tempo and key" in captured.err
     assert "Isolating" not in captured.err
     assert not (tmp_path / "inference.lock").exists()
+
+
+def test_mood_is_brighter_for_a_major_chord_than_a_minor_one_and_stays_in_range():
+    def mood_of(notes, level):
+        wave = clicks(100, 12, amplitude=0.6) + tone(notes, 12, amplitude=level)
+        reading = measure(stereo(wave), RATE, lambda _stage: None)
+        return reading.valence, reading.energy
+
+    major, major_energy = mood_of((60, 64, 67, 72, 76, 79), 0.5)
+    minor, _ = mood_of((57, 60, 64, 69, 72, 76), 0.5)
+    _, quiet_energy = mood_of((60, 64, 67, 72, 76, 79), 0.05)
+    assert major > minor
+    assert 0.0 <= minor <= major <= 1.0
+    # The same music, much quieter, is calmer.
+    assert quiet_energy < major_energy
+
+
+def test_a_track_without_a_key_has_no_mood():
+    reading = measure(clicks(120, 12)[:, None], RATE, lambda _stage: None)
+    assert (reading.valence, reading.energy) == (None, None)
+
+
+def test_the_reading_is_the_only_thing_on_stdout(monkeypatch, tmp_path, capfd):
+    """A model download prints to stdout; the parent must still be able to read the result."""
+    from stemlab import analysis
+
+    path = tmp_path / "tone.wav"
+    sf.write(path, np.zeros((RATE, 1), "float32"), RATE)
+
+    class Reading:
+        def to_dict(self):
+            return {"bpm": 120.0, "downbeat": 0.0}
+
+    def noisy_measure(*_args):
+        print('Downloading: "https://example.test/model.ckpt"')
+        os.write(1, b"native library output\n")
+        return Reading()
+
+    monkeypatch.setattr(analysis, "measure", noisy_measure)
+    monkeypatch.setattr(analysis, "_separator", lambda *_args: None)
+    monkeypatch.setattr(analysis, "_beat_tracker", lambda *_args: None)
+    assert analysis.main([str(path)]) == 0
+    out = capfd.readouterr().out
+    assert json.loads(out) == {"bpm": 120.0, "downbeat": 0.0}

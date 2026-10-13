@@ -24,12 +24,6 @@ export function nearestBeat(time, bpm, downbeat) {
   return nearestStep(time, grid.downbeat, grid.interval);
 }
 
-export function snapToBar(time, bpm, downbeat) {
-  const grid = phase(bpm, downbeat);
-  if (!grid || typeof time !== "number" || !Number.isFinite(time)) return time;
-  return nearestStep(time, grid.downbeat, grid.interval * BEATS_PER_BAR);
-}
-
 function lineTimes(bpm, downbeat, start, end, beatsPerLine) {
   const grid = phase(bpm, downbeat);
   if (!grid || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
@@ -49,4 +43,11 @@ export function beatLines(bpm, downbeat, start, end) {
 
 export function barLines(bpm, downbeat, start, end) {
   return lineTimes(bpm, downbeat, start, end, BEATS_PER_BAR);
+}
+
+// Index of the bar (0 is the first) that a time falls nearest the start of, or null without a grid.
+export function nearestBar(time, bpm, downbeat) {
+  const grid = phase(bpm, downbeat);
+  if (!grid || typeof time !== "number" || !Number.isFinite(time)) return null;
+  return Math.round((time - grid.downbeat) / (grid.interval * BEATS_PER_BAR));
 }

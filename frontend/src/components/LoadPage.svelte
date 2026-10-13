@@ -3,7 +3,7 @@
   import DeckWave from "./DeckWave.svelte";
   import { choose } from "../lib/deck.js";
   import { readingLine } from "../lib/format.js";
-  import { beginAnalysis, resetAnalysis } from "../lib/jobs.js";
+  import { beginAnalysis, resetAnalysis, reuseReading } from "../lib/jobs.js";
   import { setPreviewVolume } from "../lib/section.js";
   import { analysisSettled, goStems } from "../lib/nav.js";
   import { session } from "../lib/state.svelte.js";
@@ -61,7 +61,8 @@
     requestAnimationFrame(() => {
       if (token === pickToken) picking = true;
     });
-    beginAnalysis(file);
+    if (session.sourceJob) reuseReading(session.sourceJob, file);
+    else beginAnalysis(file);
   });
 
   let followFrame = 0;
@@ -129,6 +130,7 @@
   class:back={session.motion === "back"}
   hidden={session.step !== "load"}
 >
+  <div class="load-main">
   <div
     id="dropzone"
     class="dropzone"
@@ -139,7 +141,7 @@
     ondrop={drop}
   >
     <div class="drop-copy">
-      <h2 id="upload-title">Drop a WAV or MP3 on the deck</h2>
+      <h2 id="upload-title">Drop a WAV, MP3 or FLAC on the deck</h2>
       <p id="limits">{session.limits}</p>
       <p id="chosen" class="chosen" aria-live="polite">{session.chosenLabel}</p>
     </div>
@@ -151,7 +153,7 @@
       >Choose a file<input
         id="file"
         type="file"
-        accept=".wav,.mp3,audio/wav,audio/x-wav,audio/mpeg"
+        accept=".wav,.mp3,.flac,audio/wav,audio/x-wav,audio/mpeg,audio/flac"
         disabled={session.uploading}
         onchange={(event) => choose(event.currentTarget.files?.[0])}
       /></label
@@ -190,6 +192,7 @@
         </div>
         <DeckWave
           peaks={session.wave.peaks}
+          bands={session.wave.bands}
           samples={session.wave.samples}
           sampleRate={session.wave.sampleRate}
           scale={session.wave.scale}
@@ -232,6 +235,8 @@
         {/if}
       </section>
     {/if}
+  </div>
+  <div class="load-side">
     {#if session.file && session.tags}
       {#key `${session.file.name}:${session.file.size}:${session.file.lastModified}`}
       <section class="tags" aria-label="Track details">
@@ -272,5 +277,6 @@
       disabled={!session.file || session.uploading || !settled}
       onclick={goStems}>Choose stems</button
     >
+  </div>
   </div>
 </div>

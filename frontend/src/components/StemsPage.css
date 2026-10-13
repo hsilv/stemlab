@@ -36,12 +36,12 @@
 .stem-key {
   position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--stack);
-  min-width: 112px;
-  min-height: 112px;
-  padding: 16px 14px;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 56px;
+  padding: 0 14px;
   color: var(--ink);
   background: var(--deck);
   border: 1px solid var(--line);
@@ -50,8 +50,8 @@
 }
 
 .stem-key .icon {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   color: inherit;
 }
 
@@ -95,8 +95,8 @@
   display: flex;
   height: 100%;
   min-width: 0;
-  min-height: 96px;
-  padding: var(--pad);
+  min-height: 72px;
+  padding: var(--space-4);
   font: inherit;
   background: var(--deck);
   border: 1px solid var(--line);
@@ -133,12 +133,11 @@
 
 .mode-card:has(input:checked) {
   background: var(--face);
-  border-color: var(--amber);
-  box-shadow: var(--neon);
+  border-color: var(--accent);
 }
 
 .mode-card:has(input:checked) strong {
-  color: var(--amber);
+  color: var(--accent);
 }
 
 .custom-sources,

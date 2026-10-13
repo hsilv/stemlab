@@ -18,6 +18,8 @@ COPY src ./src
 COPY --from=ui /src/stemlab/web/ui ./src/stemlab/web/ui
 RUN uv sync --frozen --no-dev --extra ${INFERENCE_EXTRA}
 ENV PATH="/app/.venv/bin:$PATH" STEMLAB_DATA_DIR=/data TORCH_HOME=/data/models
+# ffmpeg writes the 320 kbps MP3 downloads.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 USER stemlab
 EXPOSE 8000
 CMD ["uvicorn", "stemlab.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,80 @@
+.how {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+#page-generate .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  font-size: 13px;
+}
+
+#page-generate .field .label,
+#page-generate legend {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#page-generate textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+  resize: vertical;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.help {
+  font-size: 13px;
+}
+
+.help summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.help ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+#page-generate .reference {
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+#page-generate .reference label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#page-generate .kind {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#page-generate input[type="range"] {
+  width: 100%;
+}

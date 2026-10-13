@@ -97,7 +97,7 @@ for (const [mode, label, output, format] of [
     );
     expect(names).toEqual([`${output}.wav`]);
     await page.reload();
-    await page.getByRole("button", { name: "Process", exact: true }).click();
+    await page.getByRole("button", { name: "Result", exact: true }).click();
     await expect(page.locator("#detail")).toContainText(`Output: ${label}`);
     await expect(page.locator("#detail audio")).toHaveCount(2);
     if (mode === "custom") {

@@ -138,14 +138,14 @@ def test_poll_reads_the_stage_the_child_writes(client, monkeypatch):
 
 def test_analysis_failure_sets_status_and_error(client, monkeypatch):
     def fake(command, **kwargs):
-        kwargs["stderr"].write("Isolating the instrumental\nmodel failed\n")
+        kwargs["stderr"].write("Isolating the harmony\nmodel failed\n")
         return Finished(1)
 
     monkeypatch.setattr("stemlab.routes.subprocess.Popen", fake)
     response = post_analysis(client)
     body = wait_analysis(client, response.json()["id"])
     assert body["status"] == "failed"
-    assert body["stage"] == "Isolating the instrumental"
+    assert body["stage"] == "Isolating the harmony"
     assert body["error"] == "model failed"
     assert "bpm" not in body
 

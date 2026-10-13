@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && mkdir -p ../src/stemlab/web && rm -rf ../src/stemlab/web/ui && cp -a dist ../src/stemlab/web/ui"
+    "build": "vite build && node scripts/publish.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",

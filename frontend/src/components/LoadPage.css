@@ -178,14 +178,6 @@
   .tags {
     grid-template-columns: 1fr;
   }
-
-  #page-load .tags-title {
-    font-size: 40px;
-  }
-
-  #page-load .tags-artist {
-    font-size: 16px;
-  }
 }
 
 .deck {
@@ -209,8 +201,8 @@
 
 #set-downbeat[aria-pressed="true"] {
   color: var(--deck);
-  background: var(--amber);
-  border-color: var(--amber);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 #to-stems.primary {
@@ -223,7 +215,6 @@
     filter: brightness(0.7);
   }
   to {
-    box-shadow: var(--neon);
     filter: brightness(1);
   }
 }
@@ -234,5 +225,74 @@
   #page-load .file-label {
     animation: none;
     transition: none;
+  }
+}
+
+/* Deck on the left, what the file is and the way on on the right. */
+#page-load {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  gap: var(--gap);
+  align-items: start;
+}
+
+.load-main,
+.load-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.load-side .tags {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.load-side .sleeve {
+  max-width: 96px;
+}
+
+.load-side .tags-cover {
+  max-width: 96px;
+  max-height: 96px;
+}
+
+#page-load .tags-title {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+#page-load .tags-artist {
+  font-size: 14px;
+}
+
+.load-side .tags dl {
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.load-side .tags dt {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.load-side .tags dd {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.reading {
+  font-family: var(--mono);
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+@media (max-width: 1000px) {
+  #page-load {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

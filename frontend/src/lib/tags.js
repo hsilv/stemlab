@@ -285,6 +285,67 @@ async function readWav(file) {
   return tags;
 }
 
+const VORBIS_FIELDS = {
+  TITLE: "title",
+  ARTIST: "artist",
+  ALBUM: "album",
+  GENRE: "genre",
+  DATE: "year",
+};
+
+// A FLAC comment block: a vendor string, then "NAME=value" entries, all little endian.
+function readVorbisComments(body, tags) {
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  let at = 4 + view.getUint32(0, true);
+  const count = at + 4 <= body.length ? view.getUint32(at, true) : 0;
+  at += 4;
+  for (let index = 0; index < count && at + 4 <= body.length; index++) {
+    const length = view.getUint32(at, true);
+    at += 4;
+    const entry = new TextDecoder("utf-8").decode(body.subarray(at, at + length));
+    at += length;
+    const split = entry.indexOf("=");
+    const field = VORBIS_FIELDS[entry.slice(0, split).toUpperCase()];
+    if (!field || split < 0 || tags[field]) continue;
+    const value = entry.slice(split + 1);
+    tags[field] = field === "year" ? parseYear(value) : field === "genre" ? parseGenre(value) : clean(value);
+  }
+}
+
+// A FLAC picture block, big endian: kind, media type, description, size, colours, image.
+function readFlacPicture(body, tags) {
+  if (body.length < 32) return;
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  const kind = view.getUint32(0);
+  const mimeLength = view.getUint32(4);
+  const mime = ascii(body, 8, mimeLength);
+  let at = 8 + mimeLength;
+  at += 4 + view.getUint32(at) + 16;
+  if (at + 4 > body.length) return;
+  const size = view.getUint32(at);
+  const image = body.slice(at + 4, at + 4 + size);
+  if (image.length && (kind === 3 || !tags.cover)) tags.cover = { mime, image, type: kind };
+}
+
+// FLAC: "fLaC", then metadata blocks of a type byte (top bit: the last one) and a 3 byte size.
+async function readFlac(file) {
+  const tags = {};
+  for (let offset = 4; offset + 4 <= file.size; ) {
+    const head = new Uint8Array(await file.slice(offset, offset + 4).arrayBuffer());
+    const type = head[0] & 0x7f;
+    const size = (head[1] << 16) | (head[2] << 8) | head[3];
+    const start = offset + 4;
+    if (type === 4 || type === 6) {
+      const body = new Uint8Array(await file.slice(start, start + size).arrayBuffer());
+      if (type === 4) readVorbisComments(body, tags);
+      else readFlacPicture(body, tags);
+    }
+    if (head[0] & 0x80) break;
+    offset = start + size;
+  }
+  return tags;
+}
+
 async function readId3v1(file) {
   if (file.size < 128) return {};
   const bytes = new Uint8Array(await file.slice(file.size - 128).arrayBuffer());
@@ -316,6 +377,8 @@ export async function readTags(file) {
       keep(tags, parseId3(new Uint8Array(await file.slice(0, 10 + size).arrayBuffer())));
     } else if (ascii(head, 0, 4) === "RIFF") {
       keep(tags, await readWav(file));
+    } else if (ascii(head, 0, 4) === "fLaC") {
+      keep(tags, await readFlac(file));
     }
     keep(tags, await readId3v1(file));
   } catch {

@@ -1,5 +1,6 @@
 import { clock } from "./format.js";
 import {
+  exportFormat,
   instrumentSourceNames,
   modelNames,
   sourceNames,
@@ -41,8 +42,8 @@ export function previewNote(mode, chosen) {
 }
 
 export function outputSummary(mode, chosen) {
-  if (mode === "all") return "4 individual WAV files";
-  if (chosen.length) return "1 WAV file · Your selected sounds";
+  if (mode === "all") return `4 individual ${exportFormat} files`;
+  if (chosen.length) return `1 ${exportFormat} file · Your selected sounds`;
   return "Choose at least one sound";
 }
 
@@ -71,7 +72,25 @@ export function describeEffect(mode, ranges, from, to) {
     : "You get the whole song. The effect applies only to this section; the rest stays as the original.";
 }
 
+export function extendNote(row) {
+  if (row.extend?.operations) {
+    const count = row.extend.operations.length;
+    return ` · Manual, ${count} operation${count === 1 ? "" : "s"}`;
+  }
+  const { intro, outro } = row.extend ?? {};
+  const side = (name, part) => (part ? `${name} ${part.bars} bars` : "");
+  const parts = [side("Intro", intro), side("Outro", outro)].filter(Boolean);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+// Choices that give the whole instrumental at once, so only No vocals can use them.
+export function wholeInstrumental(value) {
+  return value === "inverse" || value.startsWith("direct_");
+}
+
 export function qualityText(row) {
+  if (row.instruments_from.startsWith("direct_"))
+    return `Instruments: ${instrumentSourceNames[row.instruments_from].replace(" (No vocals only)", "")}`;
   const vocals = `Vocals: ${vocalNames[row.vocals]}`;
   const tail = `${row.shifts} shifts · ${Math.round(row.overlap * 100)}% overlap`;
   if (row.vocals !== "demucs" && row.instruments_from === "inverse")
@@ -107,6 +126,8 @@ export function stageValue(stage, status) {
   if (/Separating drums/.test(stage)) return 62;
   if (/Separating/.test(stage)) return 42;
   if (/Restoring/.test(stage)) return 80;
+  if (/Loading ACE-Step/.test(stage)) return 20;
+  if (/Generating/.test(stage)) return 55;
   if (/Writing/.test(stage)) return 88;
   if (/Preparing/.test(stage)) return 94;
   if (/Loading model/.test(stage)) return 22;

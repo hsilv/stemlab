@@ -101,9 +101,12 @@ test("pick a section from cues on the waveform", async ({ page }) => {
   await expect([await page.inputValue("#from"), await page.inputValue("#to")]).toEqual(["12", ""]);
 
   // Clicking the bare waveform picks a time; Whole track clears.
+  // The click would snap to bar 0 with the grid on, so switch the grid off to see the raw time.
   await page.locator("#clear").click();
+  await page.locator("#snap").uncheck();
   await wave.click({ position: { x: 50, y: 40 } });
   expect(Number(await page.inputValue("#from"))).toBeGreaterThan(0);
+  await page.locator("#snap").check();
   await page.locator("#clear").click();
   await expect(page.locator("#from")).toHaveValue("");
   await expect(page.locator("#page-ranges .deck-detail .deck-selection")).toBeHidden();
@@ -117,4 +120,91 @@ test("pick a section from cues on the waveform", async ({ page }) => {
   await expect(page.locator("#page-ranges .deck-detail .deck-band")).toHaveCount(2);
   await expect(page.locator(".range")).toHaveCount(2);
   await expect(page.locator("#section-effect")).toContainText("only inside the ranges");
+});
+
+test("zoom, drag and the snap switch fine-adjust a range", async ({ page }) => {
+  await page.goto("/");
+  await page.setInputFiles("#file", { name: "cued.wav", mimeType: "audio/wav", buffer: cuedWav() });
+  await page.getByRole("button", { name: "Choose stems" }).click();
+  await page.getByRole("button", { name: "Set ranges" }).click();
+  const wave = page.locator("#page-ranges .deck-detail");
+  await expect(wave).toBeVisible();
+  const snap = page.locator("#snap");
+  await expect(snap).toBeEnabled();
+  await expect(snap).toBeChecked();
+
+  // On the grid, two clicks a few pixels apart land on the same beat; off it, they do not.
+  const pick = async (x) => {
+    await page.locator("#from").fill("");
+    await page.locator("#to").fill("");
+    await wave.click({ position: { x, y: 40 } });
+    return Number(await page.inputValue("#from"));
+  };
+  expect(await pick(330)).toBe(await pick(334));
+  await snap.uncheck();
+  expect(await pick(330)).not.toBe(await pick(334));
+
+  // Zoomed in, a drag moves the window along the track without placing an edge.
+  await page.locator("#from").fill("");
+  const viewport = page.locator("#page-ranges .deck-viewport");
+  for (let step = 0; step < 4; step += 1) await page.getByRole("button", { name: "Zoom in" }).click();
+  const before = await viewport.evaluate((node) => node.style.left);
+  const box = await wave.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + 60, { steps: 8 });
+  await page.mouse.up();
+  const after = await viewport.evaluate((node) => node.style.left);
+  expect(parseFloat(after)).toBeGreaterThan(parseFloat(before));
+  await expect(page.locator("#from")).toHaveValue("");
+  await page.screenshot({ path: "test-results/section-zoom.png", fullPage: true });
+});
+
+test("the needle follows the section preview", async ({ page }) => {
+  await page.goto("/");
+  await page.setInputFiles("#file", { name: "cued.wav", mimeType: "audio/wav", buffer: cuedWav() });
+  await page.getByRole("button", { name: "Choose stems" }).click();
+  await page.getByRole("button", { name: "Set ranges" }).click();
+  const needle = page.locator("#page-ranges .deck-overview .deck-needle");
+  await expect(needle).toBeVisible();
+  await page.locator("#from").fill("4");
+  await page.locator("#to").fill("12");
+  await page.locator("#preview").click();
+  await expect(page.locator("#preview")).toHaveText("Stop");
+  // The preview starts at 4 s of a 16 s track: a quarter of the way along, then moving.
+  await expect.poll(async () => parseFloat(await needle.evaluate((node) => node.style.left))).toBeGreaterThan(25);
+  const first = parseFloat(await needle.evaluate((node) => node.style.left));
+  await page.waitForTimeout(600);
+  expect(parseFloat(await needle.evaluate((node) => node.style.left))).toBeGreaterThan(first);
+  await page.locator("#preview").click();
+});
+
+test("the zoomed waveform repaints with the needle while previewing", async ({ page }) => {
+  await page.goto("/");
+  await page.setInputFiles("#file", { name: "cued.wav", mimeType: "audio/wav", buffer: cuedWav() });
+  await page.getByRole("button", { name: "Choose stems" }).click();
+  await page.getByRole("button", { name: "Set ranges" }).click();
+  for (let step = 0; step < 4; step += 1) await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.locator("#from").fill("2");
+  await page.locator("#preview").click();
+  await page.waitForTimeout(300);
+  // Count animation frames whose canvas differs from the one before. A wave that only repaints
+  // now and then, while the needle and grid move every frame, shows as flicker.
+  const changes = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const canvas = document.querySelector("#page-ranges .deck-detail canvas");
+        const seen = [];
+        const tick = () => {
+          const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+          let hash = 0;
+          for (let index = 0; index < data.length; index += 997) hash = (hash * 31 + data[index]) | 0;
+          seen.push(hash);
+          if (seen.length < 60) requestAnimationFrame(tick);
+          else resolve(seen.filter((value, index) => index && value !== seen[index - 1]).length);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+  expect(changes).toBeGreaterThan(30);
 });

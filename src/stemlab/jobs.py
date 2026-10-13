@@ -1,15 +1,18 @@
 """SQLite metadata shared by the API and single-host worker."""
 
-import fcntl
 import json
 import sqlite3
 import time
 from contextlib import closing, contextmanager
 from uuid import uuid4
 
+from stemlab import filelock
 from stemlab.config import settings
+from stemlab.outputs import STEMS, stem_file
 
 TERMINAL = {"completed", "failed", "cancelled"}
+# Songs are kept under their own extension. Jobs of any other name were stored as WAV.
+INPUT_SUFFIXES = (".wav", ".mp3", ".flac")
 # Columns added after the first release. Defaults describe how older jobs were processed.
 MIGRATED_COLUMNS = {
     "mode": "TEXT NOT NULL DEFAULT 'all'",
@@ -27,6 +30,13 @@ MIGRATED_COLUMNS = {
     "key_name": "TEXT",
     "downbeat": "REAL",
     "analysis_warning": "TEXT",
+    # The first job of the song this one edits. NULL on jobs from before edits were grouped:
+    # such a job is its own song.
+    "song_id": "TEXT",
+    # JSON: the intro and outro of an "extend" job. NULL for every other mode.
+    "extend": "TEXT",
+    # JSON: the prompt, length and seed of a "generate" job. NULL for every other mode.
+    "generate": "TEXT",
 }
 ANALYSIS_FIELDS = {"status", "stage", "error", "bpm", "camelot", "key_name", "downbeat", "warning"}
 
@@ -58,11 +68,31 @@ def database():
             id TEXT PRIMARY KEY, status TEXT NOT NULL, stage TEXT NOT NULL,
             error TEXT, bpm REAL, camelot TEXT, key_name TEXT, downbeat REAL,
             warning TEXT, created REAL NOT NULL, updated REAL NOT NULL)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS readings (
+            path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+            bpm REAL, camelot TEXT, key_name TEXT, downbeat REAL, warning TEXT,
+            valence REAL, energy REAL)""")
+        # Readings cached before moods existed lack the two columns.
+        cached = {row["name"] for row in db.execute("PRAGMA table_info(readings)")}
+        for name in ("valence", "energy"):
+            if name not in cached:
+                db.execute(f"ALTER TABLE readings ADD COLUMN {name} REAL")
         yield db
 
 
 def create(
-    job_id, filename, info, quality, mode="all", keep=None, section=None, ranges=None, analysis=None
+    job_id,
+    filename,
+    info,
+    quality,
+    mode="all",
+    keep=None,
+    section=None,
+    ranges=None,
+    analysis=None,
+    song_id=None,
+    extend=None,
+    generate=None,
 ):
     now = time.time()
     analysis = analysis or {}
@@ -75,9 +105,9 @@ def create(
             "(id, filename, status, stage, created, updated, duration, sample_rate, channels, "
             "error, task_id, mode, keep, model, vocals, instruments_from, shifts, overlap, "
             "range_start, range_end, ranges, bpm, camelot, key_name, downbeat, "
-            "analysis_warning) VALUES "
+            "analysis_warning, song_id, extend, generate) VALUES "
             "(?, ?, 'queued', 'Waiting for worker', ?, ?, ?, ?, ?, NULL, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 job_id,
                 filename,
@@ -101,6 +131,9 @@ def create(
                 analysis.get("key_name"),
                 analysis.get("downbeat"),
                 analysis.get("analysis_warning"),
+                song_id or job_id,
+                json.dumps(extend) if extend else None,
+                json.dumps(generate) if generate else None,
             ),
         )
     return get(job_id)
@@ -116,12 +149,51 @@ def decode(row):
     result = dict(row)
     result["keep"] = json.loads(result["keep"]) if result["keep"] is not None else None
     result["ranges"] = json.loads(result["ranges"]) if result.get("ranges") else None
+    result["extend"] = json.loads(result["extend"]) if result.get("extend") else None
+    result["generate"] = json.loads(result["generate"]) if result.get("generate") else None
     return result
 
 
+def full_stems_folder(song_id):
+    """The stems folder of a finished whole-song 'all' edit of this song, or None.
+
+    A later extended edit slices its loops out of it instead of separating them again.
+    """
+    with database() as db:
+        rows = db.execute(
+            "SELECT id FROM jobs WHERE status = 'completed' AND mode = 'all' "
+            "AND range_start IS NULL AND (ranges IS NULL OR ranges = '') "
+            "AND (song_id = ? OR id = ?) ORDER BY created DESC",
+            (song_id, song_id),
+        ).fetchall()
+    for row in rows:
+        folder = settings.data_dir / row["id"] / "stems"
+        if all(stem_file(folder, name) for name in STEMS):
+            return folder
+    return None
+
+
+def input_suffix(filename):
+    lowered = filename.lower()
+    return next((suffix for suffix in INPUT_SUFFIXES if lowered.endswith(suffix)), ".wav")
+
+
 def source_path(row):
-    suffix = ".mp3" if row["filename"].lower().endswith(".mp3") else ".wav"
-    return settings.data_dir / row["id"] / f"source{suffix}"
+    return settings.data_dir / row["id"] / f"source{input_suffix(row['filename'])}"
+
+
+def has_source(row):
+    """False for a generated track, which has no uploaded song."""
+    return source_path(row).is_file()
+
+
+def reference_path(row):
+    """The audio a generated track was asked to sound like, or None."""
+    for suffix in (".wav", ".mp3", ".flac"):
+        path = settings.data_dir / row["id"] / f"reference{suffix}"
+        if path.is_file():
+            return path
+    return None
 
 
 def recent():
@@ -166,9 +238,7 @@ def recover_stale():
         if not folder.exists():
             continue
         with (folder / ".lock").open("a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
+            if not filelock.try_lock(lock.fileno()):
                 continue
             update(
                 row["id"],
@@ -207,3 +277,33 @@ def update_analysis(analysis_id, **values):
     query = "UPDATE analyses SET " + ", ".join(f"{key} = ?" for key in values) + " WHERE id = ?"
     with database() as db:
         return db.execute(query, [*values.values(), analysis_id]).rowcount == 1
+
+
+READING_FIELDS = ("bpm", "camelot", "key_name", "downbeat", "warning", "valence", "energy")
+
+
+def get_reading(path, size, mtime):
+    """Return the cached reading when path, size, and mtime all match.
+
+    mtime is st_mtime_ns so an unchanged file hits exactly.
+    """
+    with database() as db:
+        row = db.execute("SELECT * FROM readings WHERE path = ?", (str(path),)).fetchone()
+    if row is None or row["size"] != size or row["mtime"] != mtime:
+        return None
+    return {key: row[key] for key in READING_FIELDS}
+
+
+def save_reading(path, size, mtime, reading):
+    """Store one analysis result for this resolved path."""
+    values = tuple(reading[key] for key in READING_FIELDS)
+    with database() as db:
+        db.execute(
+            "INSERT INTO readings (path, size, mtime, bpm, camelot, key_name, downbeat, warning, "
+            "valence, energy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, "
+            "bpm = excluded.bpm, camelot = excluded.camelot, key_name = excluded.key_name, "
+            "downbeat = excluded.downbeat, warning = excluded.warning, "
+            "valence = excluded.valence, energy = excluded.energy",
+            (str(path), size, mtime, *values),
+        )

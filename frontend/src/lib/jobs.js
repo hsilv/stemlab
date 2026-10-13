@@ -12,7 +12,15 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function failureText(body, fallback) {
+const AUDIO_TYPES = { ".mp3": "audio/mpeg", ".flac": "audio/flac" };
+
+// What an upload's body is called on the wire: by its extension, WAV when it has no other.
+function audioType(filename) {
+  const extension = filename.toLowerCase().match(/\.[a-z0-9]+$/)?.[0];
+  return AUDIO_TYPES[extension] ?? "audio/wav";
+}
+
+export function failureText(body, fallback) {
   return typeof body?.detail === "string" ? body.detail : fallback;
 }
 
@@ -77,6 +85,19 @@ async function pollAnalysis(id, token, signal) {
   }
 }
 
+// A song uploaded before already has its reading stored on the job. Only a job from before
+// readings existed is analyzed again.
+export function reuseReading(row, file) {
+  if (row.bpm == null && !row.camelot) return beginAnalysis(file);
+  resetAnalysis();
+  session.bpm = row.bpm;
+  session.camelot = row.camelot;
+  session.keyName = row.key_name;
+  session.downbeat = row.downbeat;
+  session.analysisWarning = row.analysis_warning || "";
+  session.analysisStatus = "completed";
+}
+
 export async function beginAnalysis(file) {
   resetAnalysis();
   const token = analysisToken;
@@ -90,9 +111,7 @@ export async function beginAnalysis(file) {
       {
         method: "POST",
         headers: {
-          "Content-Type": file.name.toLowerCase().endsWith(".mp3")
-            ? "audio/mpeg"
-            : "audio/wav",
+          "Content-Type": audioType(file.name),
         },
         body: file,
         signal,
@@ -134,7 +153,7 @@ export async function loadConfig() {
       (_, index) => index,
     );
     session.overlapOptions = [...new Set([0.25, 0.5, 0.75, value.defaults.overlap])].sort();
-    session.limits = `WAV or MP3 · Up to ${value.max_upload_mb} MB · ${value.max_duration_seconds / 60} minutes`;
+    session.limits = `WAV, MP3 or FLAC · Up to ${value.max_upload_mb} MB · ${value.max_duration_seconds / 60} minutes`;
   } catch {
     session.message = "Cannot load server settings.";
   }
@@ -225,10 +244,9 @@ export function separate() {
   session.uploading = true;
   session.message = "";
   session.progress = 0;
-  session.uploadLabel = "Uploading…";
+  session.uploadLabel = session.sourceJob ? "Preparing…" : "Uploading…";
   const xhr = new XMLHttpRequest();
   const params = new URLSearchParams({
-    filename: file.name,
     mode: session.mode,
     model: session.model,
     vocals: session.vocals,
@@ -236,6 +254,8 @@ export function separate() {
     shifts: session.shifts,
     overlap: session.overlap,
   });
+  if (session.sourceJob) params.set("from_job", session.sourceJob.id);
+  else params.set("filename", file.name);
   if (session.mode === "custom") params.set("keep", keep.join(","));
   const spans = draftSpans();
   if (spans.length === 1) {
@@ -247,10 +267,8 @@ export function separate() {
   appendReading(params);
   showPage("process");
   xhr.open("POST", `/api/jobs?${params}`);
-  xhr.setRequestHeader(
-    "Content-Type",
-    file.name.toLowerCase().endsWith(".mp3") ? "audio/mpeg" : "audio/wav",
-  );
+  if (!session.sourceJob)
+    xhr.setRequestHeader("Content-Type", audioType(file.name));
   xhr.upload.onprogress = (event) => {
     if (event.lengthComputable)
       session.progress = (event.loaded / event.total) * 100;
@@ -265,6 +283,7 @@ export function separate() {
         );
       session.selectedId = result.id;
       session.file = null;
+      session.sourceJob = null;
       clearTags();
       resetSection();
       const input = document.getElementById("file");
@@ -282,5 +301,105 @@ export function separate() {
   xhr.onloadend = () => {
     session.uploading = false;
   };
-  xhr.send(file);
+  xhr.send(session.sourceJob ? null : file);
+}
+
+// The intro and outro to send: a side with no bars is left out, a fragment only travels with
+// the fragment source.
+export function extendPayload() {
+  if (session.extendMode === "manual") return { operations: session.manual.operations };
+  const side = (planned, withTreatment) => {
+    if (!planned.bars) return null;
+    const body = { bars: planned.bars, source: planned.source };
+    if (withTreatment) body.treatment = planned.treatment;
+    if (planned.source === "fragment") body.fragment = planned.fragment;
+    return body;
+  };
+  return { intro: side(session.extend.intro, true), outro: side(session.extend.outro, false) };
+}
+
+export function extendProblem() {
+  if (session.extendMode === "manual") {
+    if (!session.bpm) return "No steady tempo was found, so there is no beat grid to extend on.";
+    return session.manual.operations.length ? "" : "Add at least one operation.";
+  }
+  const { intro, outro } = session.extend;
+  if (!intro.bars && !outro.bars) return "Choose an intro, an outro or both.";
+  if (!session.bpm) return "No steady tempo was found, so there is no beat grid to extend on.";
+  for (const [name, side] of [["intro", intro], ["outro", outro]])
+    if (side.bars && side.source === "fragment" && !side.fragment)
+      return `Select the ${name} fragment on the waveform first.`;
+  return "";
+}
+
+async function failure(response, fallback) {
+  const body = await response.json().catch(() => ({}));
+  return failureText(body, fallback);
+}
+
+// A short rendering of the joins, for listening before the real edit is made.
+export async function previewExtended(only = null) {
+  const problem = extendProblem();
+  if (problem || !session.sourceJob || session.extendBusy) {
+    session.message = problem;
+    return;
+  }
+  session.extendBusy = true;
+  session.message = "";
+  try {
+    const response = await fetch(`/api/jobs/${session.sourceJob.id}/extend-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extend: extendPayload(),
+        bpm: session.bpm,
+        downbeat: session.downbeat,
+        only,
+      }),
+    });
+    if (!response.ok) throw new Error(await failure(response, "Could not build the preview."));
+    if (session.previewUrl) URL.revokeObjectURL(session.previewUrl);
+    session.previewUrl = URL.createObjectURL(await response.blob());
+  } catch (error) {
+    session.message = error.message || "Could not build the preview.";
+  } finally {
+    session.extendBusy = false;
+  }
+}
+
+export async function createExtended() {
+  const problem = extendProblem();
+  if (problem || !session.sourceJob || session.extendBusy) {
+    session.message = problem;
+    return;
+  }
+  session.extendBusy = true;
+  session.message = "";
+  const params = new URLSearchParams({
+    from_job: session.sourceJob.id,
+    mode: "extend",
+    extend: JSON.stringify(extendPayload()),
+  });
+  appendReading(params);
+  try {
+    const response = await fetch(`/api/jobs?${params}`, { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(failureText(body, "Could not create the extended edit."));
+    session.selectedId = body.id;
+    session.file = null;
+    session.sourceJob = null;
+    clearTags();
+    resetSection();
+    if (session.previewUrl) URL.revokeObjectURL(session.previewUrl);
+    session.previewUrl = "";
+    session.manual.operations = [];
+    session.chosenLabel = "No file selected";
+    session.booth = "separate";
+    showPage("process");
+    await refresh();
+  } catch (error) {
+    session.message = error.message || "Could not create the extended edit.";
+  } finally {
+    session.extendBusy = false;
+  }
 }

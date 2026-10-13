@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>StemLab: first start</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 24px; background: #0b0c0e; color: #e8eaed; font: 14px/1.5 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 18px; font-weight: 500; }
+  p { margin: 0 0 16px; color: #b6bbc2; }
+  pre { height: 260px; margin: 0; padding: 12px; overflow: auto; background: #101114; border: 1px solid #23262b; border-radius: 2px; color: #8a9099; font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  #stage { color: #e8eaed; }
+</style>
+</head>
+<body>
+<h1>Setting up StemLab</h1>
+<p>The first start downloads the audio tools (several GB). This happens once.</p>
+<p id="stage">Starting…</p>
+<pre id="log" aria-live="polite"></pre>
+<script>
+  const log = document.getElementById("log");
+  const stage = document.getElementById("stage");
+  window.setup.onLog((text) => {
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith("STAGE:")) stage.textContent = line.slice(6);
+    }
+    log.textContent += text;
+    log.scrollTop = log.scrollHeight;
+  });
+</script>
+</body>
+</html>

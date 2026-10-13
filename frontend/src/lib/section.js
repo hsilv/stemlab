@@ -93,7 +93,7 @@ export function moveRangeEdge(index, edge, time) {
 export function pickTime(time) {
   const from = session.from;
   const to = session.to;
-  const rounded = String(Math.round(time * 10) / 10);
+  const rounded = String(Math.round(time * 1000) / 1000);
   if (from === "" || to !== "") setSection(rounded, "");
   else if (+rounded > +from) setSection(from, rounded);
   else setSection(rounded, from);
@@ -142,6 +142,18 @@ export function togglePreview() {
   }
   audio.currentTime = +session.from || 0;
   audio.play();
+}
+
+let previewFrame = 0;
+
+// The needle runs with the section preview, as it does with the Load step's player.
+export function followPreview(audio) {
+  cancelAnimationFrame(previewFrame);
+  const step = () => {
+    session.needle = audio.currentTime;
+    previewFrame = audio.paused || audio.ended ? 0 : requestAnimationFrame(step);
+  };
+  step();
 }
 
 export function stopAtEnd(event) {

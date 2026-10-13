@@ -8,9 +8,11 @@ from redis.exceptions import RedisError
 
 from stemlab.config import settings
 from stemlab.routes import router
+from stemlab.tagtool import router as tag_router
 
 app = FastAPI(title="StemLab", version="1.0.0", description="Local WAV/MP3 separation and mixing")
 app.include_router(router)
+app.include_router(tag_router)
 
 UI_DIR = Path(__file__).parent / "web" / "ui"
 for asset in ("assets", "fonts"):

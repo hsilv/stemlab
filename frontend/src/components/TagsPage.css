@@ -1,0 +1,83 @@
+.tag-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.tag-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tag-side legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tag-side label,
+.tag-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.kind {
+  display: flex;
+  gap: 8px;
+}
+
+.kind button[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.tag-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.tag-card .cover {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tag-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.tag-card dt {
+  color: var(--secondary);
+}
+
+.tag-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tag-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+  max-width: 420px;
+}
+
+.tag-options label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}

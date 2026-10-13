@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   align-self: stretch;
-  min-height: calc(100vh - 48px - 32px);
+  min-height: calc(100vh - 44px - 32px);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -19,14 +19,17 @@
 
 .section-heading h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 #count {
-  color: var(--secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 #history {
@@ -41,9 +44,7 @@
 }
 
 .track {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  row-gap: 6px;
   width: 100%;
   padding: 16px;
   color: inherit;
@@ -60,15 +61,110 @@
 }
 
 .track small {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.dot.completed {
+  background: var(--ready);
+}
+
+.dot.running,
+.dot.cancelling {
+  background: var(--working);
+}
+
+.dot.failed {
+  background: var(--error);
+}
+
+.crate-columns,
+.track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px 36px;
+  column-gap: var(--space-2);
+}
+
+.crate-columns {
+  padding: 8px 16px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+}
+
+.crate-columns span:nth-child(2) {
+  text-align: right;
+}
+
+.track strong,
+.track small {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell {
+  grid-row: 1 / span 2;
+  align-self: center;
   color: var(--secondary);
+  font-family: var(--mono);
   font-size: 12px;
+  text-align: right;
+}
+
+.cell.key {
+  grid-column: 3;
+  color: var(--bass);
+  text-align: left;
+}
+
+.cell:not(.key) {
+  grid-column: 2;
+}
+
+.song {
+  border-bottom: 1px solid var(--line);
+}
+
+.song > .track {
+  border-bottom: 0;
+}
+
+.song-head[aria-expanded="true"] {
+  background: var(--face);
+}
+
+.track.edit {
+  padding-left: 32px;
+  border-left: 2px solid var(--line);
 }
 
 .track.selected {
   background: var(--face);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 @media (max-width: 700px) {
+  .crate-columns {
+    display: none;
+  }
+
   .crate {
     order: 1;
     min-height: 0;
@@ -78,6 +174,12 @@
   #history {
     display: flex;
     overflow-x: auto;
+  }
+
+  .song {
+    display: flex;
+    flex: 0 0 auto;
+    border-right: 1px solid var(--line);
   }
 
   .track {

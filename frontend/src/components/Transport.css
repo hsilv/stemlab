@@ -1,0 +1,57 @@
+.transport-strip {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 56px;
+  padding: 0 var(--pad);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.transport-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--deck);
+  background: var(--accent);
+  border-color: var(--accent);
+  border-radius: 50%;
+}
+
+.transport-name {
+  flex: 0 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-time {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.transport-time.dim {
+  color: var(--faint);
+}
+
+.transport-seek {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+body:has(.transport-strip) main {
+  padding-bottom: calc(var(--pad) + 56px);
+}

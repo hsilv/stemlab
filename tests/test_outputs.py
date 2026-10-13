@@ -28,11 +28,14 @@ def test_output_wavs_contain_exactly_selected_sources(tmp_path, mode, keep, expe
     result = write_outputs(sources, 16000, tmp_path, plan)
     assert [stem.name for stem in result] == expected
     assert sorted(path.stem for path in tmp_path.iterdir()) == sorted(expected)
+    peak = max(float(sum(sources[n] for n in group["sources"]).max()) for group in plan)
+    gain = max(1.0, peak / 0.999)
     for group in plan:
-        data, rate = sf.read(tmp_path / f"{group['id']}.wav", dtype="float32")
+        data, rate = sf.read(tmp_path / f"{group['id']}.flac", dtype="float32")
         assert rate == 16000
-        # Includes values > 1 to ensure mixes are not clipped or normalized.
-        np.testing.assert_array_equal(data, sum(sources[name] for name in group["sources"]).T)
+        # The sums reach 1.875, so every output shares one gain: levels stay relative, no clip.
+        wanted = sum(sources[name] for name in group["sources"]).T / gain
+        np.testing.assert_allclose(data, wanted, atol=1e-6)
 
 
 @pytest.mark.parametrize(
@@ -108,7 +111,7 @@ def test_write_outputs_with_backdrop_returns_the_whole_song(tmp_path):
     sources = {name: np.full((2, 2 * rate), 0.1, dtype="float32") for name in STEMS}
     plan = output_plan("instrumental")
     write_outputs(sources, rate, tmp_path, plan, original, 2 * rate)
-    data, _ = sf.read(tmp_path / "instrumental.wav", dtype="float32")
+    data, _ = sf.read(tmp_path / "instrumental.flac", dtype="float32")
     assert data.shape == (6 * rate, 2)
     assert data[0, 0] == 0.25 and data[-1, 0] == 0.25
     assert data[3 * rate, 0] == pytest.approx(0.3)  # drums + bass + other = 3 × 0.1

@@ -2,7 +2,7 @@
   import "./RangesPage.css";
   import DeckWave from "./DeckWave.svelte";
   import { clock } from "../lib/format.js";
-  import { snapToBar } from "../lib/grid.js";
+  import { nearestBeat } from "../lib/grid.js";
   import { separate } from "../lib/jobs.js";
   import {
     chosenSources,
@@ -18,13 +18,11 @@
     pickTime,
     removeRange,
     setSection,
-    stopAtEnd,
     setPreviewVolume,
     togglePreview,
   } from "../lib/section.js";
   import { session, showPage } from "../lib/state.svelte.js";
 
-  let previewLabel = $state("Preview section");
   const chosen = $derived(chosenSources(session.mode, session.keep));
   const blocked = $derived(!session.file || session.uploading || !chosen.length);
   const cues = $derived(
@@ -35,8 +33,21 @@
     describeEffect(session.mode, session.ranges, session.from, session.to),
   );
 
+  const gridKnown = $derived(
+    typeof session.bpm === "number" && session.bpm > 0 && typeof session.downbeat === "number",
+  );
+  const snapping = $derived(session.snap && gridKnown);
+
+  function aligned(time) {
+    return snapping ? nearestBeat(time, session.bpm, session.downbeat) : time;
+  }
+
+  function onSeek(time, exact) {
+    pickTime(exact ? time : aligned(time));
+  }
+
   function onEdge(kind, time) {
-    const snapped = snapToBar(time, session.bpm, session.downbeat);
+    const snapped = aligned(time);
     if (kind.index < 0) moveSelectionEdge(kind.edge, snapped);
     else moveRangeEdge(kind.index, kind.edge, snapped);
   }
@@ -62,6 +73,7 @@
     {#if session.step === "ranges" && session.wave}
       <DeckWave
         peaks={session.wave.peaks}
+        bands={session.wave.bands}
         samples={session.wave.samples}
         sampleRate={session.wave.sampleRate}
         scale={session.wave.scale}
@@ -74,12 +86,24 @@
         ranges={session.ranges}
         selection={{ from: session.from, to: session.to }}
         cues={cues}
-        onseek={pickTime}
+        snap={snapping}
+        onseek={onSeek}
         onzoom={(level) => (session.zoom = level)}
         onvolume={setPreviewVolume}
         onEdge={onEdge}
       />
     {/if}
+    <label class="snap" class:off={!gridKnown}>
+      <input
+        id="snap"
+        type="checkbox"
+        checked={snapping}
+        disabled={!gridKnown}
+        onchange={(event) => (session.snap = event.currentTarget.checked)}
+      />
+      Snap to the beat grid
+      <small>{gridKnown ? "Snaps to the nearest beat. Turn off to place an edge anywhere." : "No beat grid for this track."}</small>
+    </label>
     <div id="segments" class="segments">
       {#if cues.length}
         {#each bounds.slice(0, -1) as start, index (`${start?.time ?? "start"}|${bounds[index + 1]?.time ?? "end"}`)}
@@ -112,7 +136,7 @@
           id="from"
           type="number"
           min="0"
-          step="0.1"
+          step="0.01"
           placeholder="start"
           value={session.from}
           oninput={(event) => (session.from = event.currentTarget.value)}
@@ -123,14 +147,14 @@
           id="to"
           type="number"
           min="0"
-          step="0.1"
+          step="0.01"
           placeholder="end"
           value={session.to}
           oninput={(event) => (session.to = event.currentTarget.value)}
         />s</label
       >
       <button type="button" id="add-range" onclick={addRange}>Add range</button>
-      <button type="button" id="preview" onclick={togglePreview}>{previewLabel}</button>
+      <button type="button" id="preview" onclick={togglePreview}>{session.previewing ? "Stop" : "Preview section"}</button>
       <button
         type="button"
         id="clear"
@@ -150,18 +174,13 @@
         onchange={(event) => importRekordbox(event.currentTarget.files?.[0])}
       /></label
     >
-    <audio
-      id="section-audio"
-      hidden
-      onplay={() => (previewLabel = "Stop")}
-      onpause={() => (previewLabel = "Preview section")}
-      ontimeupdate={stopAtEnd}
-    ></audio>
     <p id="cue-note" class="note" aria-live="polite">
       Click a cue on the waveform (first click sets the start, second sets the end),
       drag either edge to adjust it, pick a stretch between cues, or type times in
-      seconds, then add the range. Dragged edges and the arrow keys snap to the bar.
-      Typed times stay as entered. WAV
+      seconds, then add the range. With the beat grid on, clicks, dragged edges and the arrow
+      keys snap to the nearest beat (the arrow keys move one beat, or one bar with Shift); with
+      it off they land exactly where you put them (arrow keys move 0.01 s, or 0.1 s with Shift). Cues and typed times always stay as entered. Scroll to
+      zoom at the pointer, drag the zoomed waveform to move along it. WAV
       cue markers and Mixxx hot cues are read automatically; for Rekordbox, export your
       collection as XML and add it here.
     </p>

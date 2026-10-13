@@ -1,0 +1,166 @@
+#page-playlist .plate {
+  margin-top: 0;
+  gap: var(--gap);
+  padding: var(--pad);
+}
+
+.folder-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.folder-path {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.folder-actions .primary,
+#page-playlist .block > .primary {
+  flex: 1 1 160px;
+  min-height: 56px;
+  padding: var(--pad);
+  font-size: 18px;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--stack);
+}
+
+.list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  width: 100%;
+}
+
+#page-playlist h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.list-head span,
+.scan-count {
+  color: var(--secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--stack);
+}
+
+.scan-status progress,
+.player audio {
+  width: 100%;
+}
+
+.scan-count,
+.player .note {
+  margin: 0;
+}
+
+.player audio {
+  margin-top: var(--stack);
+}
+
+.rows {
+  width: 100%;
+  border-top: 1px solid var(--line);
+}
+
+.playlist-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.playlist-row.is-playing {
+  background: var(--face);
+}
+
+.row-play,
+.row-copy {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 10px;
+  text-align: left;
+}
+
+.row-play {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.row-play:hover {
+  background: var(--face);
+  border-color: transparent;
+}
+
+.playlist-row.is-playing .row-play:hover {
+  background: transparent;
+}
+
+.row-play strong,
+.row-copy strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.row-play small,
+.row-copy small {
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-right: 8px;
+}
+
+#page-playlist button[aria-pressed="true"] {
+  color: var(--deck);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #page-playlist .folder-actions .primary,
+  #page-playlist .block > .primary {
+    transition: none;
+  }
+}

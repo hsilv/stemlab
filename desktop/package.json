@@ -1,0 +1,91 @@
+{
+  "name": "stemlab-desktop",
+  "productName": "StemLab",
+  "version": "0.1.0",
+  "description": "StemLab desktop shell: a window around the local StemLab server",
+  "private": true,
+  "main": "main.js",
+  "author": "StemLab",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "fetch-uv": "node scripts/fetch-uv.mjs",
+    "fetch-ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "bundle-runtime": "node scripts/bundle-runtime.mjs",
+    "dist": "npm run fetch-uv && npm run fetch-ffmpeg && electron-builder",
+    "dist:full": "npm run fetch-uv && npm run fetch-ffmpeg && npm run bundle-runtime && electron-builder --config electron-builder.full.cjs"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.stemlab.desktop",
+    "productName": "StemLab",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "backend.js",
+      "preload.js",
+      "setup.html",
+      "package.json",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../pyproject.toml",
+        "to": "app/pyproject.toml"
+      },
+      {
+        "from": "../uv.lock",
+        "to": "app/uv.lock"
+      },
+      {
+        "from": "../scripts/bootstrap.py",
+        "to": "app/scripts/bootstrap.py"
+      },
+      {
+        "from": "../src/stemlab",
+        "to": "app/src/stemlab",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "resources/bin",
+        "to": "bin"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "AudioVideo",
+      "icon": "build/icon.png",
+      "maintainer": "StemLab",
+      "synopsis": "Local stem separation"
+    },
+    "deb": {
+      "recommends": [
+        "zenity"
+      ]
+    }
+  },
+  "homepage": "https://github.com/hsilv/stemlab",
+  "desktopName": "stemlab-desktop.desktop"
+}

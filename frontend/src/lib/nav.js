@@ -29,7 +29,7 @@ export function goStemsTab() {
 
 export function goStems() {
   if (!session.file) {
-    session.message = "Choose a WAV or MP3 first.";
+    session.message = "Choose a WAV, MP3 or FLAC first.";
     return;
   }
   if (holdForGrid()) return;
@@ -40,7 +40,7 @@ export function goStems() {
 
 export function goRanges() {
   if (!session.file) {
-    session.message = "Choose a WAV or MP3 first.";
+    session.message = "Choose a WAV, MP3 or FLAC first.";
     return;
   }
   if (holdForGrid()) return;

@@ -3,10 +3,11 @@
   import { onMount } from "svelte";
   import { clock } from "../lib/format.js";
   import { barLines, beatInterval, beatLines, nearestBeat } from "../lib/grid.js";
-  import { refinePeaks } from "../lib/waveform.js";
+  import { bandColor, bandPalette, refinePeaks } from "../lib/waveform.js";
 
   let {
     peaks = [],
+    bands = null,
     samples = null,
     sampleRate = 0,
     scale = 1,
@@ -20,6 +21,7 @@
     selection = null,
     cues = [],
     armed = false,
+    snap = true,
     onseek,
     onzoom,
     onvolume,
@@ -28,8 +30,8 @@
   } = $props();
 
   const MIN_ZOOM = 1;
-  const MAX_ZOOM = 64;
-  const MIN_WINDOW = 0.25;
+  const MAX_ZOOM = 400;
+  const MIN_WINDOW = 0.1;
   const SCROLL_PIXEL = 1;
 
   let root;
@@ -37,12 +39,17 @@
   let detailCanvas;
   let suppressClick = false;
   let painted = null;
+  // Where the zoomed window is centered after the listener drags or zooms at the pointer.
+  // Null follows the needle; a new needle position takes the window back to it.
+  let panTo = $state(null);
+  let panning = $state(false);
 
   const magnification = $derived(clampZoom(zoom, duration));
-  const view = $derived(viewWindow(duration, needle, magnification));
+  const view = $derived(viewWindow(duration, panTo ?? needle, magnification));
   const selectionSpan = $derived(selectionWindow(selection, duration));
   const playhead = $derived(Number.isFinite(needle) ? needle : 0);
-  const needleAt = $derived(needlePercent(view, playhead, magnification));
+  const needleAt = $derived(needlePercent(view, playhead, magnification, panTo));
+  const needleShown = $derived(needleAt >= 0 && needleAt <= 100);
   const viewport = $derived(viewportBox(duration, view));
 
   function clampZoom(value, trackDuration) {
@@ -64,11 +71,12 @@
     return { start, end: start + span, span };
   }
 
-  function needlePercent(wave, playheadTime, level) {
-    if (level > 1) return 50;
+  function needlePercent(wave, playheadTime, level, panned) {
+    if (level > 1 && panned == null) return 50;
     if (!(wave.span > 0)) return 0;
     const ratio = (playheadTime - wave.start) / wave.span;
-    return Math.min(100, Math.max(0, ratio * 100));
+    // A panned window can leave the needle off screen; the whole track clamps it to the ends.
+    return level > 1 ? ratio * 100 : Math.min(100, Math.max(0, ratio * 100));
   }
 
   function viewportBox(trackDuration, wave) {
@@ -153,12 +161,14 @@
     return peak;
   }
 
-  function drawPeaks(context, values, trackDuration, origin, span, width, height, color) {
+  // tint(x) is the colour of column x; without it every column takes `color`.
+  function drawPeaks(context, values, trackDuration, origin, span, width, height, color, tint) {
     context.fillStyle = color;
     const middle = height / 2;
     for (let x = 0; x < width; x += 1) {
       const peak = columnPeak(values, trackDuration, origin, span, width, x);
       if (!(peak > 0)) continue;
+      if (tint) context.fillStyle = tint(x);
       const bar = Math.max(1, peak * height * 0.92);
       context.fillRect(x, middle - bar / 2, 1, bar);
     }
@@ -193,8 +203,28 @@
           width,
         )
       : null;
+    const palette =
+      bands &&
+      bandPalette(
+        cssColor(canvas, "--band-low", ""),
+        cssColor(canvas, "--band-mid", ""),
+        cssColor(canvas, "--band-high", ""),
+      );
+    const tint = palette
+      ? (x) => bandColor(bands, origin + ((x + 0.5) / width) * span, duration, palette)
+      : null;
     if (refined) {
-      drawPeaks(context, refined, span, 0, span, width, height, cssColor(canvas, "--secondary", "#d5d3ce"));
+      drawPeaks(
+        context,
+        refined,
+        span,
+        0,
+        span,
+        width,
+        height,
+        cssColor(canvas, "--secondary", "#d5d3ce"),
+        tint,
+      );
     } else {
       drawPeaks(
         context,
@@ -205,17 +235,18 @@
         width,
         height,
         cssColor(canvas, "--secondary", "#d5d3ce"),
+        tint,
       );
     }
     if (!showGrid) return;
-    const amber = cssColor(canvas, "--amber", "#e0a15a");
+    const amber = cssColor(canvas, "--accent", "#e0a15a");
     const end = origin + span;
     const beats = beatLines(bpm, downbeat, origin, end);
     const bars = barLines(bpm, downbeat, origin, end);
     if (lineSpacing(beats, span, width) >= 4)
-      drawLines(context, beats, origin, span, width, height, amber, 0.35, 1);
+      drawLines(context, beats, origin, span, width, height, amber, 0.18, 1);
     if (lineSpacing(bars, span, width) >= 3)
-      drawLines(context, bars, origin, span, width, height, amber, 0.9, 2);
+      drawLines(context, bars, origin, span, width, height, amber, 0.6, 2);
   }
 
   function paintShift(start, span) {
@@ -227,6 +258,7 @@
   function peaksStale(start, span) {
     if (!painted) return true;
     if (painted.duration !== duration || painted.peaks !== peaks) return true;
+    if (painted.bands !== bands) return true;
     if (painted.bpm !== bpm || painted.downbeat !== downbeat) return true;
     if (painted.span !== span) return true;
     return paintShift(start, span) >= SCROLL_PIXEL;
@@ -240,15 +272,63 @@
       span: view.span,
       duration,
       peaks,
+      bands,
       bpm,
       downbeat,
     };
   }
 
-  function changeZoom(factor) {
+  // anchor is where the zoom is held, from 0 (left edge) to 1: the time under it stays put.
+  function changeZoom(factor, anchor = 0.5) {
     const next = clampZoom(Math.round(magnification * factor * 1000) / 1000, duration);
     if (next === magnification) return;
+    const held = view.start + anchor * view.span;
+    panTo = clampTime(held - (anchor - 0.5) * (duration / next));
     onzoom?.(next);
+  }
+
+  function panBy(seconds) {
+    if (magnification <= MIN_ZOOM) return;
+    panTo = clampTime(view.start + view.span / 2 + seconds);
+  }
+
+  function anchorAt(clientX) {
+    const box = detailCanvas?.getBoundingClientRect();
+    if (!box?.width) return 0.5;
+    return Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+  }
+
+  function beginPan(event) {
+    if (magnification <= MIN_ZOOM || event.button !== 0 || event.target.closest("button")) return;
+    const surface = event.currentTarget;
+    const box = detailCanvas.getBoundingClientRect();
+    if (!box.width) return;
+    const startX = event.clientX;
+    const startCenter = view.start + view.span / 2;
+    const span = view.span;
+    let moved = false;
+    surface.setPointerCapture(event.pointerId);
+    const move = (pointer) => {
+      const shift = pointer.clientX - startX;
+      if (!moved && Math.abs(shift) < 4) return;
+      moved = true;
+      panning = true;
+      panTo = clampTime(startCenter - (shift / box.width) * span);
+    };
+    const finish = () => {
+      surface.removeEventListener("pointermove", move);
+      surface.removeEventListener("pointerup", finish);
+      surface.removeEventListener("pointercancel", finish);
+      panning = false;
+      // The click that follows a drag must not place a range edge.
+      if (moved) {
+        suppressClick = true;
+        setTimeout(() => (suppressClick = false), 0);
+      }
+    };
+    surface.addEventListener("pointermove", move);
+    surface.addEventListener("pointerup", finish);
+    surface.addEventListener("pointercancel", finish);
   }
 
   function clampTime(time) {
@@ -263,7 +343,8 @@
     return view.start + ratio * view.span;
   }
 
-  function activate(time) {
+  // exact: the time is a cue, which must not be moved by whoever listens to onseek.
+  function activate(time, exact = false) {
     if (!(duration > 0)) return;
     if (armed) {
       if (beatInterval(bpm) == null || typeof downbeat !== "number" || !Number.isFinite(downbeat))
@@ -271,7 +352,7 @@
       else ondownbeat?.(nearestBeat(time, bpm, downbeat));
       return;
     }
-    onseek?.(clampTime(time));
+    onseek?.(clampTime(time), exact);
   }
 
   function overviewClick(event) {
@@ -294,7 +375,7 @@
 
   function cueClick(event, time) {
     event.stopPropagation();
-    activate(time);
+    activate(time, true);
   }
 
   function edgeTime(kind) {
@@ -340,12 +421,12 @@
     const direction = event.key === "ArrowLeft" ? -1 : 1;
     const current = edgeTime(kind);
     const interval = beatInterval(bpm);
-    if (interval != null && typeof downbeat === "number" && Number.isFinite(downbeat)) {
-      const bars = event.shiftKey ? 4 : 1;
-      onEdge?.(kind, current + direction * interval * 4 * bars);
+    if (snap && interval != null && typeof downbeat === "number" && Number.isFinite(downbeat)) {
+      const beats = event.shiftKey ? 4 : 1;
+      onEdge?.(kind, current + direction * interval * beats);
       return;
     }
-    const step = (event.shiftKey ? 1 : 0.1) * direction;
+    const step = (event.shiftKey ? 0.1 : 0.01) * direction;
     onEdge?.(kind, current + step);
   }
 
@@ -354,18 +435,29 @@
     const span = view.span;
     duration;
     peaks;
+    bands;
     bpm;
     downbeat;
-    if (!peaksStale(start, span)) return;
-    const frame = requestAnimationFrame(paint);
-    return () => cancelAnimationFrame(frame);
+    // Paint now, in the frame whose state changed. Deferring it to the next animation frame
+    // let each needle update cancel the pending paint during playback, so the wave stood still
+    // while the needle, cues and grid moved over it.
+    if (peaksStale(start, span)) paint();
+  });
+
+  $effect(() => {
+    needle;
+    panTo = null;
   });
 
   onMount(() => {
     const wheel = (event) => {
       event.preventDefault();
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        panBy((event.deltaX / 400) * view.span);
+        return;
+      }
       if (!event.deltaY) return;
-      changeZoom(Math.exp(-event.deltaY / 400));
+      changeZoom(Math.exp(-event.deltaY / 400), anchorAt(event.clientX));
     };
     root.addEventListener("wheel", wheel, { passive: false });
     const observer = new ResizeObserver(() => paint());
@@ -384,7 +476,10 @@
   <div
     class="deck-detail"
     class:armed
+    class:pannable={magnification > MIN_ZOOM}
+    class:panning
     aria-label={armed ? "Set the downbeat" : "Waveform detail"}
+    onpointerdown={beginPan}
     onclick={detailClick}
   >
     <canvas bind:this={detailCanvas} aria-hidden="true"></canvas>
@@ -451,7 +546,7 @@
         {/each}
       </div>
     {/if}
-    {#if duration > 0}
+    {#if duration > 0 && needleShown}
       <div class="deck-needle" style:left="{needleAt}%"></div>
     {/if}
   </div>
@@ -492,12 +587,12 @@
       <button
         type="button"
         disabled={!(duration > 0) || magnification <= MIN_ZOOM}
-        onclick={() => changeZoom(1 / 1.25)}>Zoom out</button
+        onclick={() => changeZoom(1 / 1.5)}>Zoom out</button
       >
       <button
         type="button"
         disabled={!(duration > 0) || magnification >= clampZoom(MAX_ZOOM, duration)}
-        onclick={() => changeZoom(1.25)}>Zoom in</button
+        onclick={() => changeZoom(1.5)}>Zoom in</button
       >
     </div>
     <label class="deck-volume">

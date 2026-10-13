@@ -11,8 +11,16 @@
   display: block;
   height: 100%;
   width: 0;
-  background: var(--amber);
+  background: var(--working);
   transition: width 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.meter.done .meter-fill {
+  background: var(--ready);
+}
+
+.meter.failed .meter-fill {
+  background: var(--error);
 }
 
 .meter.busy .meter-fill::after {
@@ -59,15 +67,19 @@
 
 .meta {
   margin-top: var(--stack);
-  color: var(--secondary);
-  font-size: 12px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .badge {
   flex: none;
   padding: 3px 8px;
   color: var(--secondary);
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
 }
@@ -75,6 +87,22 @@
 .badge.failed {
   color: var(--error);
   border-color: var(--error);
+}
+
+.badge.done,
+.badge.completed {
+  color: var(--ready);
+  border-color: var(--ready);
+}
+
+.badge.queued {
+  color: var(--faint);
+}
+
+.badge.running,
+.badge.cancelling {
+  color: var(--working);
+  border-color: var(--working);
 }
 
 .stage {
@@ -96,7 +124,7 @@
   width: 10px;
   height: 10px;
   border: 1px solid var(--line);
-  border-top-color: var(--amber);
+  border-top-color: var(--working);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -152,7 +180,7 @@ audio {
 @media (prefers-reduced-motion: reduce) {
   .stage.busy::before {
     animation: none;
-    border-color: var(--amber);
+    border-color: var(--accent);
   }
 
   .meter.busy .meter-fill::after {
@@ -162,4 +190,12 @@ audio {
   .meter-fill {
     transition: none;
   }
+}
+
+.format {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+  font-size: 13px;
 }

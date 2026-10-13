@@ -45,9 +45,8 @@
 }
 
 .chip.active {
-  color: var(--amber);
-  border-color: var(--amber);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--amber) 45%, transparent);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .transport {
@@ -107,3 +106,20 @@
   }
 }
 
+
+.snap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.snap small {
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.snap.off {
+  opacity: 0.6;
+}

@@ -65,7 +65,7 @@ test("upload, separate, preview, download, reload, delete on desktop and mobile"
     filename.replace(".wav", "-stems.zip"),
   );
   await page.reload();
-  await page.getByRole("button", { name: "Process", exact: true }).click();
+  await page.getByRole("button", { name: "Result", exact: true }).click();
   await expect(page.locator("#detail .badge")).toHaveText("completed");
   await page.screenshot({
     path: "test-results/stemlab-desktop.png",

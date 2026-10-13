@@ -1,7 +1,9 @@
-import fcntl
 import io
+import json
 import sqlite3
 import time
+import zipfile
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -10,7 +12,7 @@ import pytest
 import soundfile as sf
 from fastapi.testclient import TestClient
 
-from stemlab import jobs
+from stemlab import exports, filelock, jobs, tags
 from stemlab.config import settings
 from stemlab.main import app
 from stemlab.worker import range_options, separate_job
@@ -165,6 +167,48 @@ def test_completed_downloads(client):
     assert client.get(f"/api/jobs/{row['id']}/download").content == b"test-archive"
 
 
+def test_new_stems_are_flac_and_old_wav_stems_still_play(client):
+    row = upload(client).json()
+    folder = settings.data_dir / row["id"] / "stems"
+    folder.mkdir()
+    (folder / "vocals.flac").write_bytes(b"flac")
+    (folder / "drums.wav").write_bytes(wav())
+    jobs.update(row["id"], status="completed", stage="Ready")
+    path = f"/api/jobs/{row['id']}"
+    assert client.get(path + "/audio/vocals").headers["content-type"] == "audio/flac"
+    assert client.get(path + "/audio/drums").headers["content-type"] == "audio/wav"
+
+
+def test_another_edit_reuses_the_upload_without_a_body(client):
+    first = upload(client).json()
+    params = "from_job=" + first["id"] + "&mode=vocals&start=0.1&end=1.1&bpm=120"
+    second = client.post(f"/api/jobs?{params}")
+    assert second.status_code == 202
+    second = second.json()
+    assert second["id"] != first["id"]
+    assert (second["filename"], second["mode"], second["bpm"]) == ("track.wav", "vocals", 120)
+    # Every edit, including an edit of an edit, belongs to the song's first job.
+    third = client.post(f"/api/jobs?from_job={second['id']}").json()
+    assert first["song_id"] == second["song_id"] == third["song_id"] == first["id"]
+    source = settings.data_dir / first["id"] / "source.wav"
+    copy = settings.data_dir / second["id"] / "source.wav"
+    assert copy.read_bytes() == source.read_bytes()
+    # Each edit owns its folder: removing the first song's job leaves the second playable.
+    client.post(f"/api/jobs/{first['id']}/cancel")
+    assert client.delete(f"/api/jobs/{first['id']}").status_code == 204
+    assert client.get(f"/api/jobs/{second['id']}/audio/original").status_code == 200
+
+
+def test_another_edit_needs_an_existing_upload(client):
+    assert client.post(f"/api/jobs?from_job={uuid4()}").status_code == 404
+    row = upload(client).json()
+    (settings.data_dir / row["id"] / "source.wav").unlink()
+    response = client.post(f"/api/jobs?from_job={row['id']}")
+    assert response.status_code == 404
+    assert len(list(settings.data_dir.iterdir())) == 2  # database file and the first job
+    assert client.post("/api/jobs").status_code == 422
+
+
 def test_running_cancellation_stops_subprocess_before_terminal_state(client):
     row = upload(client).json()
     task_id = jobs.get(row["id"])["task_id"]
@@ -200,7 +244,7 @@ def test_stale_recovery_does_not_release_live_process_lock(client):
     with jobs.database() as db:
         db.execute("UPDATE jobs SET status='running', updated=?", (time.time() - 180,))
     with (settings.data_dir / row["id"] / ".lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        assert filelock.try_lock(lock.fileno())
         jobs.recover_stale()
         assert jobs.get(row["id"])["status"] == "running"
     jobs.recover_stale()
@@ -268,6 +312,23 @@ def test_mp3_upload_original_playback_and_retry(client):
         separate_job.apply(args=[row["id"]], task_id=jobs.get(row["id"])["task_id"])
     assert str(jobs.source_path(row)) in process.call_args.args[0]
     assert "--mode" in process.call_args.args[0] and "instrumental" in process.call_args.args[0]
+
+
+def test_flac_upload_is_stored_and_played_back_as_flac(client):
+    content = wav(format="FLAC", rate=44100)
+    row = client.post("/api/jobs?filename=Music.FLAC&mode=vocals", content=content).json()
+    assert row["status"] == "queued"
+    assert jobs.source_path(row).name == "source.flac"
+    original = client.get(f"/api/jobs/{row['id']}/audio/original")
+    assert original.content == content
+    assert original.headers["content-type"] == "audio/flac"
+    assert "flac" in client.get("/api/config").json()["input_formats"]
+
+
+def test_reject_disguised_flac_and_unknown_extensions(client):
+    assert client.post("/api/jobs?filename=bad.flac", content=wav()).status_code == 422
+    assert client.post("/api/jobs?filename=bad.wav", content=wav(format="FLAC")).status_code == 422
+    assert client.post("/api/jobs?filename=song.ogg", content=wav()).status_code == 422
 
 
 def test_reject_disguised_mp3_and_mp3_duration_limit(client, monkeypatch):
@@ -346,22 +407,34 @@ def test_invalid_section_rejected_and_cleaned_up(client, query):
 
 
 @pytest.mark.parametrize(
+    "choice", ["inverse", "direct_resurrection", "direct_inst_v2", "direct_bleedless"]
+)
+@pytest.mark.parametrize(
     "query,status",
     [
-        ("mode=instrumental&instruments_from=inverse", 202),
-        ("mode=custom&keep=drums,bass,other&instruments_from=inverse", 202),
-        ("mode=all&instruments_from=inverse", 422),
-        ("mode=vocals&instruments_from=inverse", 422),
-        ("mode=custom&keep=vocals,bass&instruments_from=inverse", 422),
+        ("mode=instrumental", 202),
+        ("mode=custom&keep=drums,bass,other", 202),
+        ("mode=all", 422),
+        ("mode=vocals", 422),
+        ("mode=custom&keep=vocals,bass", 422),
     ],
 )
-def test_mix_minus_vocals_only_for_no_vocals_outputs(client, query, status):
-    response = client.post(f"/api/jobs?filename=track.wav&{query}", content=wav())
+def test_whole_instrumental_choices_only_for_no_vocals_outputs(client, query, status, choice):
+    response = client.post(
+        f"/api/jobs?filename=track.wav&{query}&instruments_from={choice}", content=wav()
+    )
     assert response.status_code == status
     if status == 202:
-        assert response.json()["instruments_from"] == "inverse"
+        assert response.json()["instruments_from"] == choice
     else:
         assert client.get("/api/jobs").json() == []
+
+
+def test_unknown_instrumental_choice_is_refused(client):
+    response = client.post(
+        "/api/jobs?filename=track.wav&mode=instrumental&instruments_from=direct_nope", content=wav()
+    )
+    assert response.status_code == 422
 
 
 def test_range_options_cover_one_section_several_ranges_or_the_whole_track():
@@ -482,13 +555,9 @@ def test_separation_holds_the_inference_lock(client):
     def fake_popen(*args, **kwargs):
         path = settings.data_dir / "inference.lock"
         with path.open("a") as handle:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                seen["held"] = True
-            else:
-                seen["held"] = False
-                fcntl.flock(handle, fcntl.LOCK_UN)
+            seen["held"] = not filelock.try_lock(handle.fileno())
+            if not seen["held"]:
+                filelock.unlock(handle.fileno())
 
         class Finished:
             returncode = 1
@@ -510,3 +579,438 @@ def test_separation_holds_the_inference_lock(client):
     with patch("stemlab.worker.subprocess.Popen", side_effect=fake_popen):
         separate_job.apply(args=[row["id"]], task_id=jobs.get(row["id"])["task_id"])
     assert seen["held"] is True
+
+
+def finished_job(client, **kwargs):
+    row = upload(client, **kwargs).json()
+    folder = settings.data_dir / row["id"] / "stems"
+    folder.mkdir()
+    return row, folder
+
+
+@pytest.mark.parametrize(
+    ("fmt", "media"), [("wav", "audio/wav"), ("flac", "audio/flac"), ("mp3", "audio/mpeg")]
+)
+def test_stem_downloads_convert_to_the_requested_format(client, fmt, media):
+    if fmt == "mp3" and "mp3" not in exports.formats():
+        pytest.skip("ffmpeg is not installed")
+    row, folder = finished_job(client)
+    signal = (np.sin(np.arange(44100) / 20)[:, None] * 0.5).repeat(2, axis=1).astype("float32")
+    sf.write(folder / "vocals.flac", signal, 44100, format="FLAC", subtype="PCM_24")
+    jobs.update(row["id"], status="completed", stage="Ready")
+    response = client.get(f"/api/jobs/{row['id']}/audio/vocals?download=true&format={fmt}")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == media
+    assert f"track-vocals.{fmt}" in response.headers["content-disposition"]
+    decoded, rate = sf.read(io.BytesIO(response.content), dtype="float32")
+    assert rate == 44100 and decoded.shape[1] == 2
+    if fmt == "mp3":
+        assert len(response.content) * 8 / 1.0 / 1000 > 250  # one second at roughly 320 kbps
+    else:
+        np.testing.assert_allclose(decoded, signal, atol=1e-6)
+    scratch = settings.data_dir / row["id"] / "exports"
+    assert not scratch.exists() or not list(scratch.iterdir())
+
+
+def test_old_float_wav_stem_converts_without_clipping(client):
+    row, folder = finished_job(client)
+    loud = np.full((4410, 2), 1.5, dtype="float32")
+    sf.write(folder / "vocals.wav", loud, 44100, subtype="FLOAT")
+    jobs.update(row["id"], status="completed", stage="Ready")
+    response = client.get(f"/api/jobs/{row['id']}/audio/vocals?format=flac")
+    decoded, _ = sf.read(io.BytesIO(response.content), dtype="float32")
+    assert decoded.max() == pytest.approx(0.999, abs=1e-4) and decoded.min() > 0.9
+
+
+def test_zip_download_converts_every_output(client):
+    row = client.post("/api/jobs?filename=track.wav&mode=vocals", content=wav()).json()
+    folder = settings.data_dir / row["id"]
+    (folder / "stems").mkdir()
+    sf.write(folder / "stems" / "vocals.flac", np.zeros((4410, 2), "float32"), 44100, format="FLAC")
+    (folder / "stems.zip").write_bytes(b"stored-archive")
+    jobs.update(row["id"], status="completed", stage="Ready")
+    path = f"/api/jobs/{row['id']}/download"
+    assert client.get(path + "?format=flac").content == b"stored-archive"
+    archive = client.get(path + "?format=wav")
+    assert zipfile.ZipFile(io.BytesIO(archive.content)).namelist() == ["vocals.wav"]
+    assert not list((folder / "exports").iterdir())
+
+
+def test_unavailable_or_unknown_export_formats_fail_cleanly(client, monkeypatch):
+    row, folder = finished_job(client)
+    sf.write(folder / "vocals.flac", np.zeros((4410, 2), "float32"), 44100, format="FLAC")
+    jobs.update(row["id"], status="completed", stage="Ready")
+    path = f"/api/jobs/{row['id']}/audio/vocals"
+    assert client.get(path + "?format=ogg").status_code == 422
+    monkeypatch.setattr("stemlab.exports.shutil.which", lambda _name: None)
+    assert "mp3" not in client.get("/api/config").json()["export_formats"]
+    assert client.get(path + "?format=mp3").status_code == 503
+    assert not list((folder.parent / "exports").iterdir())
+
+
+def song_job(client, **params):
+    """A 60 second upload that already has its reading (120 BPM, first bar at 0.5 s)."""
+    query = "&".join(
+        f"{key}={value}" for key, value in {"bpm": 120, "downbeat": 0.5, **params}.items()
+    )
+    return client.post(
+        f"/api/jobs?filename=song.wav&camelot=8A&key_name=A%20minor&{query}",
+        content=wav(seconds=60),
+    ).json()
+
+
+EXTEND = '{"intro":{"bars":4},"outro":{"bars":8,"source":"last_bars"}}'
+
+
+def test_an_extended_edit_belongs_to_the_song_and_keeps_its_parameters(client):
+    first = song_job(client)
+    second = client.post(f"/api/jobs?from_job={first['id']}&mode=extend&extend={EXTEND}")
+    assert second.status_code == 202
+    row = second.json()
+    assert (row["mode"], row["song_id"], row["bpm"], row["downbeat"]) == (
+        "extend",
+        first["id"],
+        120,
+        0.5,
+    )
+    assert row["key_name"] == "A minor" and row["ranges"] is None
+    assert row["extend"]["intro"]["bars"] == 4 and row["extend"]["outro"]["source"] == "last_bars"
+    assert row["outputs"] == [
+        {
+            "id": "extended",
+            "label": "Extended edit",
+            "sources": ["vocals", "drums", "bass", "other"],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("extend", "message"),
+    [
+        ('{"intro":{"bars":5}}', "bars"),
+        ("{}", "intro, an outro or both"),
+        ('{"intro":{"bars":4,"source":"fragment","fragment":[5,2]}}', "fragment"),
+        ('{"intro":{"bars":32,"source":"first_bars"}}', None),
+        ("not json", None),
+    ],
+)
+def test_bad_extension_parameters_are_refused_with_a_reason(client, extend, message):
+    song = song_job(client)
+    response = client.post(f"/api/jobs?from_job={song['id']}&mode=extend&extend={extend}")
+    if extend.startswith('{"intro":{"bars":32'):
+        # 60 s at 120 BPM is plenty for four bars, which is all a loop needs.
+        assert response.status_code == 202
+        return
+    assert response.status_code == 422
+    if message:
+        assert message in response.json()["detail"]
+
+
+def test_an_extended_edit_needs_a_tempo_a_song_and_enough_bars(client):
+    assert (
+        client.post(
+            f"/api/jobs?filename=x.wav&mode=extend&extend={EXTEND}", content=wav()
+        ).status_code
+        == 422
+    )
+    no_tempo = client.post("/api/jobs?filename=song.wav", content=wav(seconds=60)).json()
+    response = client.post(f"/api/jobs?from_job={no_tempo['id']}&mode=extend&extend={EXTEND}")
+    assert response.status_code == 422 and "steady tempo" in response.json()["detail"]
+    short = client.post(
+        "/api/jobs?filename=short.wav&bpm=120&downbeat=0", content=wav(seconds=5)
+    ).json()
+    response = client.post(f"/api/jobs?from_job={short['id']}&mode=extend&extend={EXTEND}")
+    assert response.status_code == 422 and "too short" in response.json()["detail"]
+
+
+def test_the_worker_slices_existing_full_stems_instead_of_separating(client):
+    from stemlab.worker import extend_command
+
+    song = song_job(client)
+    edit = client.post(f"/api/jobs?from_job={song['id']}&mode=extend&extend={EXTEND}").json()
+    row = jobs.get(edit["id"])
+    assert "--parts" not in extend_command(row, "out")
+    # A finished whole-song 'all' edit of the same song provides them.
+    full = client.post(f"/api/jobs?from_job={song['id']}&mode=all").json()
+    stems = settings.data_dir / full["id"] / "stems"
+    stems.mkdir()
+    for name in ("vocals", "drums", "bass", "other"):
+        (stems / f"{name}.flac").write_bytes(b"x")
+    jobs.update(full["id"], status="completed", stage="Ready")
+    command = extend_command(row, "out")
+    assert command[command.index("--parts") + 1] == str(stems)
+    assert command[command.index("--bpm") + 1] == "120.0"
+    # A section-only 'all' edit does not cover the song, so it is not used.
+    section = client.post(f"/api/jobs?from_job={song['id']}&mode=all&start=1&end=5").json()
+    assert section["id"] != full["id"]
+
+
+class Done:
+    def __init__(self, code=0):
+        self.returncode, self.stderr = code, "boom"
+
+
+def test_the_preview_returns_a_flac_and_cleans_up(client, monkeypatch):
+    song = song_job(client)
+    seen = {}
+
+    def fake(command, **_kwargs):
+        seen["command"] = command
+        folder = Path(command[4])
+        sf.write(folder / "preview.flac", np.zeros((4410, 2), "float32"), 44100, format="FLAC")
+        return Done(0)
+
+    monkeypatch.setattr("stemlab.routes.subprocess.run", fake)
+    response = client.post(
+        f"/api/jobs/{song['id']}/extend-preview", json={"extend": json.loads(EXTEND)}
+    )
+    assert response.status_code == 200 and response.headers["content-type"] == "audio/flac"
+    assert (
+        "--preview" in seen["command"]
+        and seen["command"][seen["command"].index("--bpm") + 1] == "120.0"
+    )
+    scratch = settings.data_dir / song["id"] / "exports"
+    assert not scratch.exists() or not list(scratch.iterdir())
+
+
+@pytest.mark.parametrize(("code", "status"), [(75, 503), (1, 500)])
+def test_a_busy_or_failed_preview_says_so(client, monkeypatch, code, status):
+    song = song_job(client)
+    monkeypatch.setattr("stemlab.routes.subprocess.run", lambda *_a, **_k: Done(code))
+    response = client.post(
+        f"/api/jobs/{song['id']}/extend-preview", json={"extend": json.loads(EXTEND)}
+    )
+    assert response.status_code == status
+    bad = client.post(
+        f"/api/jobs/{song['id']}/extend-preview", json={"extend": {"intro": {"bars": 3}}}
+    )
+    assert bad.status_code == 422
+
+
+@pytest.mark.skipif("mp3" not in exports.formats(), reason="ffmpeg is not installed")
+def test_the_mp3_of_an_extended_edit_carries_tempo_and_key(client):
+    import subprocess
+
+    song = song_job(client)
+    edit = client.post(f"/api/jobs?from_job={song['id']}&mode=extend&extend={EXTEND}").json()
+    folder = settings.data_dir / edit["id"] / "stems"
+    folder.mkdir()
+    sf.write(folder / "extended.flac", np.zeros((44100, 2), "float32"), 44100, format="FLAC")
+    jobs.update(edit["id"], status="completed", stage="Ready")
+    response = client.get(f"/api/jobs/{edit['id']}/audio/extended?format=mp3&download=true")
+    assert response.status_code == 200
+    target = settings.data_dir / "tagged.mp3"
+    target.write_bytes(response.content)
+    shown = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format_tags",
+            "-of",
+            "default=nw=1",
+            str(target),
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "TBPM=120.00" in shown and "TKEY=Am" in shown
+
+
+MANUAL = json.dumps(
+    {
+        "operations": [
+            {
+                "action": "insert",
+                "at": 4,
+                "bars": 4,
+                "fragment": [10.5, 20.5],
+                "stems": {"vocals": 0, "drums": 1, "bass": 1, "other": 1},
+                "model": "htdemucs",
+                "vocals": "melband",
+            },
+            {
+                "action": "replace",
+                "span": [10, 14],
+                "fragment": [10.5, 20.5],
+                "stems": {"vocals": 1, "drums": 1, "bass": 1, "other": 1},
+            },
+        ]
+    }
+)
+
+
+def test_a_manual_edit_keeps_its_operations_and_their_choices(client):
+    song = song_job(client)
+    response = client.post(f"/api/jobs?from_job={song['id']}&mode=extend&extend={MANUAL}")
+    assert response.status_code == 202
+    first, second = response.json()["extend"]["operations"]
+    assert (first["action"], first["at"], first["bars"], first["model"]) == (
+        "insert",
+        4,
+        4,
+        "htdemucs",
+    )
+    assert first["vocals"] == "melband" and first["shifts"] == settings.shifts
+    assert second["span"] == [10, 14] and "bars" not in second
+    assert second["model"] == settings.model
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"operations": []}, "at least one"),
+        ({"operations": [{"action": "insert", "at": 4, "bars": 4}]}, "fragment"),
+        (
+            {
+                "operations": [
+                    {
+                        "action": "insert",
+                        "at": 0,
+                        "bars": 4,
+                        "fragment": [1, 9],
+                        "stems": {"vocals": 1, "drums": 1, "bass": 1, "other": 1},
+                    }
+                ]
+            },
+            "insert between",
+        ),
+        (
+            {
+                "operations": [
+                    {
+                        "action": "replace",
+                        "span": [3, 3],
+                        "fragment": [1, 9],
+                        "stems": {"vocals": 1, "drums": 1, "bass": 1, "other": 1},
+                    }
+                ]
+            },
+            "at least one bar",
+        ),
+        (
+            {
+                "operations": [
+                    {
+                        "action": "start",
+                        "bars": 4,
+                        "fragment": [1, 9],
+                        "stems": {"vocals": 0, "drums": 0, "bass": 0, "other": 0},
+                    }
+                ]
+            },
+            "at least one sound",
+        ),
+    ],
+)
+def test_a_manual_edit_with_a_bad_operation_is_refused_with_the_reason(client, change, message):
+    song = song_job(client)
+    response = client.post(
+        f"/api/jobs?from_job={song['id']}&mode=extend&extend={json.dumps(change)}"
+    )
+    assert response.status_code == 422 and message in response.json()["detail"]
+
+
+def test_a_manual_preview_can_ask_for_one_operation(client, monkeypatch):
+    song = song_job(client)
+    seen = {}
+
+    def fake(command, **_kwargs):
+        seen["command"] = command
+        sf.write(
+            Path(command[4]) / "preview.flac", np.zeros((4410, 2), "float32"), 44100, format="FLAC"
+        )
+        return Done(0)
+
+    monkeypatch.setattr("stemlab.routes.subprocess.run", fake)
+    body = {"extend": json.loads(MANUAL), "only": 1}
+    assert client.post(f"/api/jobs/{song['id']}/extend-preview", json=body).status_code == 200
+    command = seen["command"]
+    assert command[command.index("--only") + 1] == "1"
+    assert (
+        client.post(f"/api/jobs/{song['id']}/extend-preview", json={**body, "only": 5}).status_code
+        == 422
+    )
+
+
+@pytest.fixture
+def tagged_upload(client, tmp_path):
+    """A job whose uploaded MP3 carries a real release's tags and cover, at 120 BPM in A minor."""
+    import subprocess
+
+    from test_tags import png, run
+
+    (tmp_path / "cover.png").write_bytes(png())
+    source = tmp_path / "source.mp3"
+    run(
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-i", str(tmp_path / "cover.png"),
+        "-map", "0:a", "-map", "1:v", "-c:a", "libmp3lame", "-c:v", "copy", "-id3v2_version", "3",
+        "-metadata", "title=Gasolina", "-metadata", "artist=Daddy Yankee",
+        "-metadata", "album=Barrio Fino", "-disposition:v", "attached_pic", str(source),
+    )  # fmt: skip
+    del subprocess
+    response = client.post(
+        "/api/jobs?filename=Gasolina.mp3&mode=instrumental&bpm=120&downbeat=0&key_name=A%20minor",
+        content=source.read_bytes(),
+    )
+    assert response.status_code == 202
+    return response.json()
+
+
+@pytest.mark.skipif(not tags.available(), reason="ffmpeg is not installed")
+def test_a_finished_job_gives_its_outputs_the_song_tags_and_a_version_name(client, tagged_upload):
+    from stemlab.outputs import output_plan
+    from stemlab.worker import tag_outputs
+
+    row = jobs.get(tagged_upload["id"])
+    folder = settings.data_dir / row["id"] / "stems"
+    folder.mkdir()
+    sf.write(folder / "instrumental.flac", np.zeros((44100, 2), "float32"), 44100, format="FLAC")
+    tag_outputs(row, output_plan(row["mode"], row["keep"]), folder)
+    written = tags.read(folder / "instrumental.flac")
+    assert written["tags"]["title"] == "Gasolina (Instrumental)"
+    assert (written["tags"]["artist"], written["tags"]["album"]) == ("Daddy Yankee", "Barrio Fino")
+    assert written["cover"] is True
+    assert written["tempo"] == {"bpm": "120.00", "key": "Am"}
+
+
+@pytest.mark.skipif(not tags.available(), reason="ffmpeg is not installed")
+@pytest.mark.parametrize("fmt", ["mp3", "wav"])
+def test_converted_downloads_carry_the_song_tags(client, tagged_upload, fmt):
+    folder = settings.data_dir / tagged_upload["id"] / "stems"
+    folder.mkdir()
+    sf.write(folder / "instrumental.flac", np.zeros((44100, 2), "float32"), 44100, format="FLAC")
+    jobs.update(tagged_upload["id"], status="completed", stage="Ready")
+    response = client.get(f"/api/jobs/{tagged_upload['id']}/audio/instrumental?format={fmt}")
+    assert response.status_code == 200
+    target = settings.data_dir / f"download.{fmt}"
+    target.write_bytes(response.content)
+    written = tags.read(target)
+    assert written["tags"]["title"] == "Gasolina (Instrumental)"
+    assert written["tags"]["artist"] == "Daddy Yankee"
+    assert written["cover"] is (fmt == "mp3")
+
+
+def test_a_failed_tagging_does_not_fail_the_job(client, monkeypatch, tmp_path):
+    from stemlab.outputs import output_plan
+    from stemlab.worker import tag_outputs
+
+    row = jobs.get(upload(client).json()["id"])
+    folder = settings.data_dir / row["id"] / "stems"
+    folder.mkdir()
+    sf.write(folder / "vocals.flac", np.zeros((441, 2), "float32"), 44100, format="FLAC")
+
+    def refuse(*_args, **_kwargs):
+        raise tags.TagError("no")
+
+    monkeypatch.setattr(tags, "available", lambda: True)
+    monkeypatch.setattr(tags, "copy", refuse)
+    tag_outputs(row, output_plan("vocals"), folder)
+
+
+def test_resurrection_can_be_the_vocal_model(client):
+    response = client.post(
+        "/api/jobs?filename=track.wav&mode=vocals&vocals=resurrection", content=wav()
+    )
+    assert response.status_code == 202 and response.json()["vocals"] == "resurrection"

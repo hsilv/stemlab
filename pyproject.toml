@@ -18,11 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-inference = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1", "audio-separator>=0.47,<1", "audioread>=3"]
-cuda = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1", "audio-separator[gpu]>=0.47,<1", "audioread>=3"]
+inference = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1", "audio-separator>=0.47,<1", "audioread>=3", "beat-this>=1.1,<2"]
+cuda = ["demucs==4.0.1", "torch==2.7.1", "torchaudio==2.7.1", "audio-separator[gpu]>=0.47,<1", "audioread>=3", "beat-this>=1.1,<2"]
 
 [tool.uv]
-environments = ["sys_platform == 'linux'"]
+environments = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
 # audio-separator only needs diffq for its own Demucs code, which StemLab does not use, and
 # diffq has no wheel (it compiles against Python headers). Roformer models never import it.
 override-dependencies = ["diffq; python_version < '0'"]

@@ -1,10 +1,10 @@
-import { isInvertible } from "./plan.js";
+import { isInvertible, wholeInstrumental } from "./plan.js";
 import { session } from "./state.svelte.js";
 
 function correctInstruments() {
   if (
     !isInvertible(session.mode, session.keep) &&
-    session.instrumentsFrom === "inverse"
+    wholeInstrumental(session.instrumentsFrom)
   )
     session.instrumentsFrom = "residual";
 }

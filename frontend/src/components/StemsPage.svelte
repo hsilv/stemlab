@@ -1,6 +1,7 @@
 <script>
   import "./StemsPage.css";
   import {
+    exportFormat,
     instrumentSourceNames,
     modeNames,
     modelNames,
@@ -10,7 +11,12 @@
     vocalNames,
   } from "../lib/labels.js";
   import { analysisSettled, goLoad, goRanges } from "../lib/nav.js";
-  import { chosenSources, isInvertible, previewNote } from "../lib/plan.js";
+  import {
+    chosenSources,
+    isInvertible,
+    previewNote,
+    wholeInstrumental,
+  } from "../lib/plan.js";
   import { setKeep, setMode } from "../lib/selection.js";
   import { session } from "../lib/state.svelte.js";
 
@@ -78,13 +84,13 @@
       <div class="output-files">
         {#if session.mode === "all"}
           {#each chosen as name (name)}
-            <div class="output-file">{sourceNames[name]} · WAV</div>
+            <div class="output-file">{sourceNames[name]} · {exportFormat}</div>
           {/each}
         {:else if chosen.length}
           <div class="output-file">
             {session.mode === "instrumental"
-              ? "Instrumental · WAV"
-              : `${modeNames[session.mode]} · WAV`}
+              ? `Instrumental · ${exportFormat}`
+              : `${modeNames[session.mode]} · ${exportFormat}`}
             <small>{chosen.map((name) => sourceNames[name]).join(" + ")}</small>
           </div>
         {/if}
@@ -115,7 +121,7 @@
           disabled={session.vocals === "demucs"}
         >
           {#each session.config?.instrument_sources ?? [] as value (value)}
-            <option {value} disabled={value === "inverse" && !invertible}
+            <option {value} disabled={wholeInstrumental(value) && !invertible}
               >{instrumentSourceNames[value] || value}</option
             >
           {/each}
@@ -140,7 +146,11 @@
         Higher quality takes longer. Roformer models give cleaner vocals; Demucs
         always makes drums, bass and other, and shifts and overlap tune that stage.
         For No vocals, "Mix minus vocals" skips Demucs and keeps everything the vocal
-        model left, unchanged. Demucs MMI scored slightly higher on bass in published
+        model left, unchanged; the instrumental models (Resurrection, Inst V2, Bleedless)
+        hear the whole instrumental directly. In a test that mixed a real instrumental
+        with a voice, none beat "Mix minus vocals" with the two-model Roformer vocals
+        (about 16.0 dB against 15.4 to 15.6 dB), and they alter audio that has no voice
+        more, so they are an option to try by ear, not the default. Demucs MMI scored slightly higher on bass in published
         tests than the fine-tuned model. If the bass sounds bubbly, try another model,
         "Original track", or plain Demucs for vocals.
       </p>

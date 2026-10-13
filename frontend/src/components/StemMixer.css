@@ -1,0 +1,138 @@
+.mixer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.mixer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mixer-head strong {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mixer-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+  color: var(--deck);
+  background: var(--accent);
+  border-color: var(--accent);
+  border-radius: 50%;
+}
+
+.mixer-time {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.mixer-time.dim {
+  color: var(--faint);
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  height: 64px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.lane.vocals {
+  --lane: var(--vocals);
+}
+
+.lane.drums {
+  --lane: var(--drums);
+}
+
+.lane.bass {
+  --lane: var(--bass);
+}
+
+.lane.other {
+  --lane: var(--other);
+}
+
+.lane-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-right: 1px solid var(--line);
+  box-shadow: inset 3px 0 0 var(--lane);
+}
+
+.lane-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-button {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  background: transparent;
+  border-color: var(--line-strong);
+}
+
+.lane-button[aria-pressed="true"] {
+  color: var(--deck);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.lane-wave {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+  transition: opacity 120ms;
+}
+
+.lane.silent .lane-wave {
+  opacity: 0.25;
+}
+
+.lane-wave canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lane-needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+@media (max-width: 700px) {
+  .lane {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+}

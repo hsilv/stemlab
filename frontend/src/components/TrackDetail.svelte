@@ -1,13 +1,18 @@
 <script>
   import "./TrackDetail.css";
   import { duration, readingLine } from "../lib/format.js";
+  import { editAgain } from "../lib/deck.js";
+  import { reuse } from "../lib/generate.js";
   import { runJobAction } from "../lib/jobs.js";
   import {
     activeStatuses,
+    exportFormats,
     modeNames,
     sourceNames,
   } from "../lib/labels.js";
-  import { qualityText, rangeNote, stageValue } from "../lib/plan.js";
+  import { extendNote, qualityText, rangeNote, stageValue } from "../lib/plan.js";
+  import ResultPlayer from "./ResultPlayer.svelte";
+  import StemMixer from "./StemMixer.svelte";
   import { session } from "../lib/state.svelte.js";
 
   const row = $derived(
@@ -17,6 +22,22 @@
   const reading = $derived(
     row ? readingLine(row.bpm, row.camelot, row.key_name) : "",
   );
+
+  const formats = $derived(
+    Object.keys(exportFormats).filter((name) =>
+      (session.config?.export_formats ?? ["flac", "wav"]).includes(name),
+    ),
+  );
+  const chosenFormat = $derived(
+    formats.includes(session.exportFormat) ? session.exportFormat : "flac",
+  );
+
+  const originalFormat = (filename) =>
+    filename.toLowerCase().endsWith(".mp3")
+      ? "MP3"
+      : filename.toLowerCase().endsWith(".flac")
+        ? "FLAC"
+        : "WAV";
 
   function pauseOthers(event) {
     document.querySelectorAll("audio").forEach((other) => {
@@ -32,7 +53,7 @@
       <p>
         {session.file
           ? "Choose an output and separate, or pick a track from the crate."
-          : "Load a WAV or MP3, or pick a track from the crate."}
+          : "Load a WAV, MP3 or FLAC, or pick a track from the crate."}
       </p>
     </div>
   {:else}
@@ -51,6 +72,8 @@
     <div
       class="meter"
       class:busy={activeStatuses.has(row.status)}
+      class:done={row.status === "completed"}
+      class:failed={row.status === "failed"}
       role="progressbar"
       aria-valuemin="0"
       aria-valuemax="100"
@@ -60,7 +83,11 @@
       <span class="meter-fill" style:width="{value}%"></span>
     </div>
     <p class="note">
-      Output: {modeNames[row.mode] || "All stems"} · {qualityText(row)}{rangeNote(row)}
+      Output: {modeNames[row.mode] || "All stems"}{row.mode === "extend"
+        ? extendNote(row)
+        : row.mode === "generate"
+          ? ` · “${row.generate.prompt}”`
+          : ` · ${qualityText(row)}${rangeNote(row)}`}
     </p>
     {#if reading}
       <p id="job-reading" class="note">{reading}</p>
@@ -79,7 +106,7 @@
     {/if}
     <div class="actions">
       {#if row.status === "completed"}
-        <a class="button primary" href="/api/jobs/{row.id}/download"
+        <a class="button primary" href="/api/jobs/{row.id}/download?format={chosenFormat}"
           >{row.mode === "all" ? "Download all stems" : "Download result ZIP"}</a
         >
       {/if}
@@ -98,6 +125,14 @@
           onclick={() => runJobAction("retry", row.id)}>Try again</button
         >
       {/if}
+      {#if row.mode === "generate"}
+        <button type="button" onclick={() => reuse(row)}>Make another take</button>
+      {:else}
+        <button type="button" disabled={session.uploading} onclick={() => editAgain(row)}
+          >Edit this song again</button
+        >
+      {/if}
+
       {#if !activeStatuses.has(row.status)}
         <button
           type="button"
@@ -107,44 +142,67 @@
         >
       {/if}
     </div>
-    <div class="stem">
-      <div class="stem-top">
-        <strong>original</strong>
-        <a href="/api/jobs/{row.id}/audio/original?download=true"
-          >{row.filename.toLowerCase().endsWith(".mp3") ? "Download MP3" : "Download WAV"}</a
-        >
+    {#if row.mode !== "generate"}
+      <div class="stem">
+        <div class="stem-top">
+          <strong>original</strong>
+          <a href="/api/jobs/{row.id}/audio/original?download=true"
+            >Download {originalFormat(row.filename)}</a
+          >
+        </div>
+        <ResultPlayer
+          src="/api/jobs/{row.id}/audio/original"
+          label="original"
+          onplay={pauseOthers}
+        />
       </div>
-      <audio
-        controls
-        preload="none"
-        src="/api/jobs/{row.id}/audio/original"
-        aria-label="original preview"
-        onplay={pauseOthers}
-      ></audio>
-    </div>
+    {/if}
     {#if row.status === "completed"}
+      <label class="format">
+        Download as
+        <select
+          value={chosenFormat}
+          onchange={(event) => (session.exportFormat = event.currentTarget.value)}
+        >
+          {#each formats as name (name)}
+            <option value={name}>{exportFormats[name]}</option>
+          {/each}
+        </select>
+      </label>
+      {#if row.mode === "all" && row.outputs.length > 1 && row.outputs.every((output) => output.sources.length === 1)}
+        {#key row.id}
+          <StemMixer jobId={row.id} outputs={row.outputs} />
+        {/key}
+      {/if}
       {#each row.outputs as output (output.id)}
         <div class="stem">
           <div class="stem-top">
             <strong>{output.label}</strong>
-            <a href="/api/jobs/{row.id}/audio/{output.id}?download=true">Download WAV</a>
+            <a href="/api/jobs/{row.id}/audio/{output.id}?download=true&format={chosenFormat}"
+              >Download {chosenFormat.toUpperCase()}</a
+            >
           </div>
-          {#if output.sources.length > 1}
+          {#if output.sources.length > 1 && row.mode !== "extend"}
             <p class="note">{output.sources.map((name) => sourceNames[name]).join(" + ")}</p>
           {/if}
-          <audio
-            controls
-            preload="none"
+          <ResultPlayer
             src="/api/jobs/{row.id}/audio/{output.id}"
-            aria-label="{output.id} preview"
+            label={output.id}
             onplay={pauseOthers}
-          ></audio>
+          />
         </div>
       {/each}
-      <p class="note">
-        44.1 kHz stereo · 32-bit float WAV. Separation may contain artifacts or sound
-        from other instruments.
-      </p>
+      {#if row.mode === "generate"}
+        <p class="note">
+          48 kHz stereo, made by an AI model from your description: listen before you use it.
+          Stored as lossless 24-bit FLAC; other formats are made when you download.
+        </p>
+      {:else}
+        <p class="note">
+          44.1 kHz stereo. Stored as lossless 24-bit FLAC (older jobs: 32-bit float WAV); other formats are made when you download. Separation may contain artifacts or sound
+          from other instruments.
+        </p>
+      {/if}
     {/if}
   {/if}
 </section>

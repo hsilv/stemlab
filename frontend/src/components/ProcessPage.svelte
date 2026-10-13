@@ -12,7 +12,7 @@
   hidden={session.step !== "process"}
 >
   <div class="page-head">
-    <h2>Processing.</h2>
+    <h2>Result.</h2>
   </div>
   <div id="upload-status" hidden={!session.uploading}>
     <label for="upload-progress" id="upload-label">{session.uploadLabel}</label>

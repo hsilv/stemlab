@@ -21,8 +21,17 @@
   cursor: pointer;
 }
 
+.deck-detail.pannable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.deck-detail.panning {
+  cursor: grabbing;
+}
+
 .deck-detail.armed {
-  border-color: var(--amber);
+  border-color: var(--accent);
   cursor: crosshair;
 }
 
@@ -60,17 +69,17 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  border-right: 1px solid var(--amber);
-  border-left: 1px solid var(--amber);
+  border-right: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
   pointer-events: none;
 }
 
 .deck-band {
-  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .deck-selection {
-  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .deck-edge {
@@ -103,7 +112,7 @@
   top: 22px;
   bottom: 22px;
   width: 2px;
-  background: var(--amber);
+  background: var(--accent);
 }
 
 .deck-edge.start::before {
@@ -116,7 +125,6 @@
 
 .deck-edge:hover::before,
 .deck-edge:focus-visible::before {
-  box-shadow: 0 0 8px var(--amber);
 }
 
 .deck-marker {
@@ -141,8 +149,7 @@
   left: 4px;
   width: 6px;
   height: 6px;
-  background: var(--amber);
-  box-shadow: 0 0 8px var(--amber);
+  background: var(--accent);
 }
 
 .deck-marker::after {
@@ -152,7 +159,7 @@
   bottom: 0;
   left: 6px;
   width: 1px;
-  background: var(--amber);
+  background: var(--accent);
 }
 
 .deck-cue-tick {
@@ -161,7 +168,7 @@
   bottom: 0;
   width: 1px;
   margin-left: -0.5px;
-  background: var(--amber);
+  background: var(--accent);
   pointer-events: none;
 }
 
@@ -171,8 +178,7 @@
   bottom: 0;
   width: 1px;
   margin-left: -0.5px;
-  background: var(--amber);
-  box-shadow: 0 0 8px var(--amber);
+  background: var(--accent);
   pointer-events: none;
   z-index: 2;
 }
@@ -182,7 +188,7 @@
   position: absolute;
   top: 0;
   left: -4px;
-  border-top: 6px solid var(--amber);
+  border-top: 6px solid var(--accent);
   border-right: 4px solid transparent;
   border-left: 4px solid transparent;
 }
@@ -210,10 +216,10 @@
 .deck-volume input {
   width: 128px;
   margin: 0;
-  accent-color: var(--amber);
+  accent-color: var(--accent);
 }
 
 .deck-volume input:focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

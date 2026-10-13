@@ -1,18 +1,21 @@
 """Isolated inference process. Heavy dependencies never load in the API."""
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from stemlab.config import DEMUCS_MODELS, settings
-from stemlab.outputs import is_instrumental, output_plan
+from stemlab.config import DEMUCS_MODELS, instrumental_only, settings
+from stemlab.outputs import STEM_SUFFIX, is_instrumental, output_plan
 from stemlab.separation import Stem
 
 # Short crossfade at the inner edges of a section so the switch to the original does not click.
 FADE_SECONDS = 0.01
+# Just under full scale so the 24-bit encoder never rounds a peak past it.
+FULL_SCALE = 0.999
 # Extra audio read on each side of a section so the models are not cut cold at its edges.
 CONTEXT_SECONDS = 5
 
@@ -106,7 +109,7 @@ def separate(
     if trim and mode != "all":
         stage("Restoring the rest of the song")
         backdrop = song_at_model_rate(source, model)
-    stage("Writing WAV stems")
+    stage("Writing FLAC stems")
     return write_outputs(
         dict(zip(model.sources, separated.cpu().numpy(), strict=True)),
         model.samplerate,
@@ -185,6 +188,15 @@ def estimate(
         # Silence / constant signals cannot be normalized safely.
         separated = torch.zeros(len(sources), *mix.shape)
         separated[sources.index("other")] = mix
+    elif instruments_from.startswith("direct_") and is_instrumental(plan):
+        from stemlab.roformer import separate_instrumental
+
+        # One model hears the whole instrumental; write_outputs sums drums, bass and other, so it
+        # can all sit in one of them.
+        separated = torch.zeros(len(sources), *mix.shape)
+        separated[sources.index("other")] = torch.from_numpy(
+            separate_instrumental(mix.numpy(), instruments_from, announce)
+        )
     elif vocals_from == "demucs":
         separated = demucs(mix, needed)
     else:
@@ -192,8 +204,8 @@ def estimate(
 
         # Skip whatever the requested output does not use.
         vocals = None
-        if instruments_from == "inverse" and not is_instrumental(plan):
-            raise ValueError("Mix minus vocals only works for No vocals.")
+        if instrumental_only(instruments_from) and not is_instrumental(plan):
+            raise ValueError("That choice only works for No vocals.")
         if "vocals" in needed or (instruments and instruments_from != "mix"):
             vocals = torch.from_numpy(separate_vocals(mix.numpy(), vocals_from, announce))
         separated = torch.zeros(len(sources), *mix.shape)
@@ -285,11 +297,8 @@ def separate_ranges(
                     group,
                 )
             )
-    stage("Writing WAV stems")
-    return [
-        Stem(group["id"], encode(signal, model.samplerate, output / f"{group['id']}.wav"))
-        for signal, group in laid
-    ]
+    stage("Writing FLAC stems")
+    return encode_all(laid, model.samplerate, output)
 
 
 def stage(text):
@@ -376,8 +385,7 @@ def write_outputs(sources, sample_rate, output, plan, backdrop=None, offset=0):
     With a backdrop (the original song), the estimates replace it starting at offset.
     """
     output.mkdir(parents=True, exist_ok=True)
-    # Float WAV preserves model output without clipping or individual stem normalization.
-    files = []
+    laid = []
     for group in plan:
         # Sum model sources before encoding; never normalize each source independently.
         signal = np.zeros_like(sources[group["sources"][0]])
@@ -385,12 +393,94 @@ def write_outputs(sources, sample_rate, output, plan, backdrop=None, offset=0):
             signal += sources[name]
         if backdrop is not None:
             signal = splice(backdrop, signal, offset, sample_rate)
-        files.append(Stem(group["id"], encode(signal, sample_rate, output / f"{group['id']}.wav")))
-    return files
+        laid.append((signal, group))
+    return encode_all(laid, sample_rate, output)
+
+
+def isolate_stems(audio, sample_rate, model_name="htdemucs", shifts=0, overlap=0.25):
+    """The four stems of one in-memory buffer, each channel-first at its sample rate.
+
+    audio is float32 (frames, channels). Nothing is written. Used for the short stretches an
+    extended edit loops, so only those are ever separated.
+    """
+    import torch
+    from demucs.audio import convert_audio
+
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim == 1:
+        audio = audio[:, None]
+    channels, frames = audio.shape[1], audio.shape[0]
+    _models, device, model = open_models(model_name)
+    mix = convert_audio(
+        torch.from_numpy(np.ascontiguousarray(audio.T)),
+        sample_rate,
+        model.samplerate,
+        model.audio_channels,
+    )
+    estimates = run_demucs(model, mix, device, shifts, overlap, set(model.sources))
+    stems = {}
+    for name, estimate in zip(model.sources, estimates, strict=True):
+        back = convert_audio(estimate.detach().cpu(), model.samplerate, sample_rate, channels)
+        stem = np.zeros((channels, frames), dtype=np.float32)
+        count = min(frames, back.shape[1])
+        stem[:, :count] = back.numpy()[:, :count]
+        stems[name] = stem
+    return stems
+
+
+def separate_fragment(
+    audio, sample_rate, wanted, inverse, model_name, vocals_from, shifts, overlap, announce=None
+):
+    """{name: (channels, frames)} for the wanted stems of one in-memory buffer.
+
+    audio is float32 (frames, channels). The voice comes from vocals_from (Demucs or a Roformer
+    choice); the instruments from Demucs on the mix. With inverse, the three instruments come as
+    one stem, "instrumental": the buffer minus the voice, so nothing the voice model leaves
+    out is lost. Used by manual extended edits, where each fragment has its own choices.
+    """
+    import torch
+    from demucs.audio import convert_audio
+
+    announce = announce or stage
+    audio = np.asarray(audio, dtype=np.float32)
+    channels, frames = audio.shape[1], audio.shape[0]
+    models, device, model = open_models(model_name)
+    mix = convert_audio(
+        torch.from_numpy(np.ascontiguousarray(audio.T)),
+        sample_rate,
+        model.samplerate,
+        model.audio_channels,
+    )
+    sources = list(wanted)
+    plan = [{"id": "fragment", "sources": ["vocals"] if inverse else sources}]
+    separated = estimate(
+        audio,
+        sample_rate,
+        models,
+        device,
+        model,
+        plan,
+        vocals_from,
+        "mix",
+        shifts,
+        overlap,
+        announce,
+    )
+
+    def back(stem):
+        out = convert_audio(stem.detach().cpu(), model.samplerate, sample_rate, channels).numpy()
+        fitted = np.zeros((channels, frames), dtype=np.float32)
+        count = min(frames, out.shape[1])
+        fitted[:, :count] = out[:, :count]
+        return fitted
+
+    if inverse:
+        return {"instrumental": back(mix - separated[model.sources.index("vocals")])}
+    return {name: back(separated[model.sources.index(name)]) for name in sources}
 
 
 def isolate_window(audio, sample_rate, kind):
-    """Return drums plus bass, or the mix minus the vocals, for one in-memory buffer.
+    """Return drums plus bass, or the harmonic stems (bass plus other), for one in-memory buffer.
 
     Plain htdemucs, no shifts. Nothing is written. audio is float32 (frames, channels)
     and the result matches that shape and sample rate.
@@ -403,10 +493,10 @@ def isolate_window(audio, sample_rate, kind):
         audio = audio[:, None]
     if kind == "drums":
         wanted = {"drums", "bass"}
-    elif kind == "instrumental":
-        wanted = {"vocals"}
+    elif kind == "harmonic":
+        wanted = {"bass", "other"}
     else:
-        raise ValueError("Window kind must be drums or instrumental.")
+        raise ValueError("Window kind must be drums or harmonic.")
     channels, frames = audio.shape[1], audio.shape[0]
     _models, device, model = open_models("htdemucs")
     mix = convert_audio(
@@ -420,9 +510,12 @@ def isolate_window(audio, sample_rate, kind):
     if kind == "drums":
         stem = estimates[names.index("drums")] + estimates[names.index("bass")]
     else:
-        stem = mix - estimates[names.index("vocals")]
+        stem = estimates[names.index("bass")] + estimates[names.index("other")]
     back = convert_audio(stem.detach().cpu(), model.samplerate, sample_rate, channels)
     out = np.ascontiguousarray(back.numpy().T, dtype=np.float32)
+    # This load exists only for the window. Drop it once the buffer is on CPU.
+    del _models, model, mix, estimates, stem, back
+    torch.cuda.empty_cache()
     if len(out) == frames:
         return out
     fitted = np.zeros((frames, channels), dtype=np.float32)
@@ -431,12 +524,51 @@ def isolate_window(audio, sample_rate, kind):
     return fitted
 
 
-def encode(signal, sample_rate, path):
-    samples = signal.T
-    if not np.isfinite(samples).all():
+_beat_tracker = None
+
+
+def track_beats(audio, sample_rate):
+    """(beats, downbeats) in seconds from the Beat This! network, or None if it cannot run.
+
+    The network is small and does not take the GPU lock. It needs the optional beat-this
+    package and, the first time, a download of its weights into the model cache; without
+    either, the caller falls back to measuring the beat from the signal.
+    """
+    global _beat_tracker
+    try:
+        if _beat_tracker is None:
+            os.environ.setdefault("TORCH_HOME", str(settings.data_dir / "models"))
+            import torch
+            from beat_this.inference import Audio2Beats
+
+            device = settings.device
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            _beat_tracker = Audio2Beats(checkpoint_path="final0", device=device)
+        beats, downbeats = _beat_tracker(np.asarray(audio, dtype=np.float32), sample_rate)
+    except Exception:
+        logging.getLogger(__name__).exception("Beat tracking unavailable")
+        return None
+    return np.asarray(beats, dtype=np.float64), np.asarray(downbeats, dtype=np.float64)
+
+
+def encode_all(laid, sample_rate, output):
+    """Write (channel-first signal, group) pairs as 24-bit FLAC, lossless at a third of float WAV.
+
+    Integer audio cannot exceed full scale, so when any output would, all of them share one
+    gain. Relative levels stay intact and nothing clips; without overshoot the gain is 1.
+    """
+    output.mkdir(parents=True, exist_ok=True)
+    if not all(np.isfinite(signal).all() for signal, _ in laid):
         raise ValueError("Model produced invalid samples")
-    sf.write(path, samples, sample_rate, subtype="FLOAT")
-    return path
+    peak = max(float(np.max(np.abs(signal))) for signal, _ in laid)
+    gain = min(1.0, FULL_SCALE / peak) if peak > 0 else 1.0
+    files = []
+    for signal, group in laid:
+        path = output / f"{group['id']}{STEM_SUFFIX}"
+        sf.write(path, (signal * gain).T, sample_rate, format="FLAC", subtype="PCM_24")
+        files.append(Stem(group["id"], path))
+    return files
 
 
 if __name__ == "__main__":

@@ -22,21 +22,30 @@
 
 :root {
   color-scheme: dark;
-  --deck: #0c0c0e;
-  --panel: #10100e;
-  --face: #1a1916;
-  --ink: #f2f0ea;
-  --secondary: #d5d3ce;
-  --line: #2e2d29;
-  --amber: #e0a15a;
-  --vocals: #e0a15a;
-  --drums: #d4654a;
-  --bass: #3f8f78;
-  --other: #8b87b0;
-  --error: #e7a090;
-  --radius: 14px;
-  --radius-control: 10px;
-  --neon: 0 0 18px color-mix(in srgb, var(--amber) 55%, transparent);
+  --deck: #0b0c0e;
+  --panel: #101114;
+  --face: #16181c;
+  --ink: #e8eaed;
+  --secondary: #b6bbc2;
+  --dim: #8a9099;
+  --faint: #5a6068;
+  --line: #23262b;
+  --line-strong: #2a2e35;
+  --accent: #e8eaed;
+  --vocals: #22d3ee;
+  --drums: #ff7a1a;
+  --bass: #8b6cff;
+  --other: #3ddc84;
+  --band-low: #ff6a2b;
+  --band-mid: #3ddc84;
+  --band-high: #cfe6ff;
+  --ready: #3ddc84;
+  --working: #ffb020;
+  --error: #ff4d5e;
+  --radius: 2px;
+  --radius-control: 2px;
+  --control: 36px;
+  --mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
   --space: 4px;
   --space-2: calc(var(--space) * 2);
   --space-3: calc(var(--space) * 3);
@@ -87,9 +96,8 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
-  box-shadow: var(--neon);
 }
 
 .sr-only {
@@ -119,7 +127,8 @@ button,
   background: var(--face);
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  padding: 8px 12px;
+  min-height: var(--control);
+  padding: 6px 12px;
   cursor: pointer;
   text-decoration: none;
 }
@@ -136,17 +145,22 @@ button:disabled,
   cursor: not-allowed;
 }
 
+.primary:disabled {
+  color: var(--faint);
+  background: transparent;
+  border-color: var(--line);
+  opacity: 1;
+}
+
 .primary {
-  background: var(--amber);
+  background: var(--accent);
   color: var(--deck);
-  border-color: var(--amber);
+  border-color: var(--accent);
   font-weight: 600;
-  box-shadow: var(--neon);
 }
 
 .primary:hover {
-  border-color: var(--amber);
-  box-shadow: 0 0 26px color-mix(in srgb, var(--amber) 70%, transparent);
+  border-color: var(--accent);
 }
 
 .file-label {
@@ -185,7 +199,10 @@ legend {
 }
 
 select,
-input[type="number"] {
+textarea,
+input[type="number"],
+input[type="text"],
+input:not([type]) {
   font: inherit;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
@@ -193,6 +210,11 @@ input[type="number"] {
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   padding: var(--space-2) var(--space-3);
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--faint);
 }
 
 input[type="checkbox"],
